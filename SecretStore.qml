@@ -68,9 +68,24 @@ Item {
   // Fetches the key and hands it to `callback(key)` without ever assigning
   // it to a QML property — so it can't end up bound into a Text label, a
   // log, or plugin debug output.
+  //
+  // Concurrent callers are coalesced into one keyring lookup. This matters:
+  // six polled resources ask for the key at almost the same moment, and an
+  // earlier single-callback version silently dropped five of them — those
+  // requests then sat "busy" forever and never retried, so five of six
+  // views stayed empty while one worked.
+  property var _pendingCallbacks: []
+
   function fetchForUse(callback) {
-    fetchProc._callback = callback
+    if (callback) root._pendingCallbacks.push(callback)
+    if (fetchProc.running) return
     fetchProc.running = true
+  }
+
+  function _deliverKey(value) {
+    var callbacks = root._pendingCallbacks
+    root._pendingCallbacks = []
+    for (var i = 0; i < callbacks.length; i++) callbacks[i](value)
   }
 
   function recheckPresence() {
@@ -90,14 +105,15 @@ Item {
   Process {
     id: fetchProc
     command: root.lookupArgs
-    property var _callback: null
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: {
-        var value = root.sanitizeKey(text)
-        if (fetchProc._callback) fetchProc._callback(value)
-        fetchProc._callback = null
-      }
+      onStreamFinished: root._deliverKey(root.sanitizeKey(text))
+    }
+    // If the lookup fails outright there may be no stdout to finish, so
+    // waiting callers would hang. Deliver an empty key instead, which
+    // callers surface as "no API key stored" rather than never answering.
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root._deliverKey("")
     }
   }
 

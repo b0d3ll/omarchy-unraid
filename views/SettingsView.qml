@@ -66,6 +66,8 @@ Column {
 
     PanelSectionHeader { text: "SERVER"; foreground: root.foreground }
 
+    // Live values once a poll has landed (spec section 50); the stored
+    // values from onboarding fill in until then.
     Grid {
       columns: 2
       columnSpacing: Style.space(12)
@@ -73,9 +75,13 @@ Column {
       visible: root.configStore && root.configStore.hostname !== ""
 
       Text { textFormat: Text.PlainText; text: "Name"; color: Qt.darker(root.foreground, 1.4); font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
-      Text { textFormat: Text.PlainText; text: root.configStore ? root.configStore.hostname : ""; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
+      Text { textFormat: Text.PlainText; text: root.service ? root.service.system.hostname : ""; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
       Text { textFormat: Text.PlainText; text: "Unraid"; color: Qt.darker(root.foreground, 1.4); font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
-      Text { textFormat: Text.PlainText; text: root.configStore ? root.configStore.unraidVersion : ""; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
+      Text { textFormat: Text.PlainText; text: root.service ? root.service.system.unraidVersion : ""; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
+      Text { textFormat: Text.PlainText; visible: apiVersionValue.text !== ""; text: "API"; color: Qt.darker(root.foreground, 1.4); font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
+      Text { id: apiVersionValue; textFormat: Text.PlainText; visible: text !== ""; text: root.service ? root.service.system.apiVersion : ""; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
+      Text { textFormat: Text.PlainText; visible: uptimeValue.text !== ""; text: "Uptime"; color: Qt.darker(root.foreground, 1.4); font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
+      Text { id: uptimeValue; textFormat: Text.PlainText; visible: text !== ""; text: root.service ? root.service.uptime : ""; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
     }
 
     Text {

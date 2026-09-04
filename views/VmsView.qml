@@ -50,7 +50,9 @@ Column {
     width: parent.width
     visible: !root._vms.available
     title: "Virtual machines unavailable"
-    message: "The server is online, but the VM API did not respond."
+    message: root.service && root.service.vmsErrorMessage !== ""
+      ? root.service.vmsErrorMessage
+      : "The server is online, but the VM API did not respond."
     actionLabel: "Retry"
     foreground: root.foreground
     onActionTriggered: if (root.service) root.service.refreshVms()

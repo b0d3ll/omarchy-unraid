@@ -5,13 +5,16 @@ import qs.Ui
 import "../components"
 import "../Model.js" as Model
 
-// Notification list with an All/Warnings/Critical filter (spec section 27).
-// Archive/detail actions land once Milestone 7 wires the real API.
+// Notification list with an All/Warnings/Critical filter (spec section 27),
+// live as of Milestone 4. Archiving lands with Milestone 7; a row click
+// opens the notification's target in the Unraid WebUI when it has one.
 Column {
   id: root
 
   property var service: null
   property color foreground: Color.foreground
+
+  signal toastRequested(string message)
 
   readonly property var _all: service ? service.notifications : []
   readonly property var _filters: ["All", "Warnings", "Critical"]
@@ -21,6 +24,16 @@ Column {
     if (root.filterIndex === 1) return root._all.filter(function(n) { return n.importance === "WARNING" })
     if (root.filterIndex === 2) return root._all.filter(function(n) { return n.importance === "ALERT" })
     return root._all
+  }
+
+  function openNotification(item) {
+    if (!root.service) return
+    var url = root.service.notificationUrl(item.link)
+    if (url === "") {
+      root.toastRequested("This notification has no page to open.")
+      return
+    }
+    Util.execArgv(["omarchy-launch-browser", url])
   }
 
   width: parent ? parent.width : implicitWidth
@@ -58,43 +71,91 @@ Column {
     Repeater {
       model: root._filtered
 
-      Column {
+      Rectangle {
         id: entry
         required property var modelData
+
+        readonly property bool urgent: entry.modelData.importance === "WARNING"
+          || entry.modelData.importance === "ALERT"
+
         width: root.width
-        spacing: Style.space(2)
+        implicitHeight: entryColumn.implicitHeight + Style.space(10)
+        color: entryMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
 
-        Row {
-          spacing: Style.space(6)
+        Behavior on color { ColorAnimation { duration: 100 } }
 
-          Text {
-            textFormat: Text.PlainText
-            text: entry.modelData.importance === "WARNING" || entry.modelData.importance === "ALERT" ? "●" : "✓"
-            color: entry.modelData.importance === "WARNING" || entry.modelData.importance === "ALERT" ? Color.urgent : Qt.darker(root.foreground, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
+        Column {
+          id: entryColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(2)
+
+          Row {
+            spacing: Style.space(6)
+            width: parent.width
+
+            Text {
+              textFormat: Text.PlainText
+              text: entry.urgent ? "●" : "✓"
+              color: entry.urgent ? Color.urgent : Qt.darker(root.foreground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width - Style.space(24)
+              elide: Text.ElideRight
+              text: entry.modelData.title
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
           }
 
           Text {
             textFormat: Text.PlainText
-            text: entry.modelData.title
-            color: root.foreground
+            width: parent.width
+            elide: Text.ElideRight
+            visible: entry.modelData.subject !== ""
+            text: entry.modelData.subject
+            color: Qt.darker(root.foreground, 1.4)
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.bodySmall
+            leftPadding: Style.space(18)
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            text: Model.relativeTime(entry.modelData.timestamp)
+              + (entry.modelData.description !== "" ? " · " + entry.modelData.description : "")
+            color: Qt.darker(root.foreground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            leftPadding: Style.space(18)
           }
         }
 
-        Text {
-          textFormat: Text.PlainText
-          text: Model.relativeTime(entry.modelData.timestamp)
-          color: Qt.darker(root.foreground, 1.4)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          leftPadding: Style.space(18)
+        MouseArea {
+          id: entryMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.openNotification(entry.modelData)
         }
-
-        PanelSeparator { width: parent.width; foreground: root.foreground; strength: 0.06 }
       }
     }
+  }
+
+  PanelSeparator { width: parent.width; foreground: root.foreground; strength: 0.06 }
+
+  Text {
+    textFormat: Text.PlainText
+    visible: root._all.length > 0
+    text: "Click a notification to open it in the Unraid WebUI."
+    color: Qt.darker(root.foreground, 1.4)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
   }
 }

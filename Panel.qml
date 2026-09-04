@@ -25,7 +25,12 @@ Panel {
 
   property ConfigStore configStore: ConfigStore {}
   property SecretStore secretStore: SecretStore {}
-  property UnraidService service: UnraidService { configStore: root.configStore }
+  property UnraidService service: UnraidService {
+    configStore: root.configStore
+    secretStore: root.secretStore
+    // Polling slows down while the panel is closed (spec section 37).
+    panelOpen: root.opened && !root.inFullPanelFlow
+  }
 
   // "loading" | "setup" | "overview" | "docker" | "vms" | "storage" |
   // "alerts" | "settings". Not a tab-index because Settings is reached via
@@ -62,24 +67,54 @@ Panel {
     { key: "alerts", label: "Alerts" }
   ]
 
-  // Milestone 2 health state: mock dashboard data is always "reachable",
-  // so this only reflects unread notifications / an in-progress parity
-  // check, or that setup hasn't happened yet. Real priority ladder
-  // (AUTH_ERROR > OFFLINE > CRITICAL > ...) arrives with the connection
-  // manager in Milestone 3.
+  // Spec section 5's priority ladder, on real data now. STALE and
+  // CONNECTING need the connection manager's probe history to distinguish
+  // "cached but old" from "never loaded", so they arrive with Milestone 3.
   readonly property string healthState: {
     if (!isConfigured) return "NOTICE"
-    if (service.unreadNotificationCount > 0) return "WARNING"
-    if (service.arrayInfo.parityCheckStatus && service.arrayInfo.parityCheckStatus.running) return "NOTICE"
+    if (service.authFailed) return "AUTH_ERROR"
+    if (service.unreachable) return "OFFLINE"
+    var array = service.arrayInfo
+    var parity = array.parityCheckStatus || ({})
+    if ((array.disabled || 0) > 0 || (array.missing || 0) > 0) return "CRITICAL"
+    if (service.notificationSummary.unread.alert > 0) return "CRITICAL"
+    if ((array.invalid || 0) > 0 || (parity.errors || 0) > 0) return "WARNING"
+    if (service.notificationSummary.unread.warning > 0) return "WARNING"
+    if (parity.running || (array.state !== "" && array.state !== "STARTED")) return "NOTICE"
+    if (!service.everLoaded) return "CONNECTING"
     return "HEALTHY"
   }
 
   readonly property string healthLabel: {
     if (!isConfigured) return "Not configured"
+    var array = service.arrayInfo
+    var parity = array.parityCheckStatus || ({})
     switch (healthState) {
+      case "AUTH_ERROR": return "API key rejected"
+      case "OFFLINE": return "Unreachable"
+      case "CRITICAL":
+        if ((array.disabled || 0) > 0) return "Array disk disabled"
+        if ((array.missing || 0) > 0) return "Array disk missing"
+        return "Alert needs attention"
       case "WARNING": return "Attention needed"
-      case "NOTICE": return "Parity check running"
+      case "NOTICE":
+        if (parity.running) return "Parity check running"
+        if (array.state !== "" && array.state !== "STARTED") return "Array " + array.state.toLowerCase()
+        return "Notice"
+      case "CONNECTING": return "Connecting…"
       default: return "Healthy"
+    }
+  }
+
+  // Spec section 37: entering a view refreshes that view's resource at once.
+  onActiveViewChanged: {
+    if (!service.active) return
+    switch (activeView) {
+      case "overview": service.refreshMetrics(); service.refreshArray(); break
+      case "docker": service.refreshDocker(); break
+      case "vms": service.refreshVms(); break
+      case "storage": service.refreshArray(); break
+      case "alerts": service.refreshNotifications(); break
     }
   }
 
@@ -309,8 +344,7 @@ Panel {
     OverviewView {
       service: root.service
       foreground: root.barForeground
-      onOpenWebUiRequested: toast.show("WebUI link needs a configured endpoint — coming in Milestone 3.")
-      onOpenTerminalRequested: toast.show("SSH shortcut needs a configured host — coming in Milestone 3.")
+      onToastRequested: function(message) { toast.show(message) }
     }
   }
 
@@ -346,6 +380,7 @@ Panel {
     AlertsView {
       service: root.service
       foreground: root.barForeground
+      onToastRequested: function(message) { toast.show(message) }
     }
   }
 

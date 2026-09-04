@@ -1,91 +1,67 @@
 import QtQuick
 import qs.Commons
-import Quickshell
-import Quickshell.Io
+// Qualified so the root directory's Panel.qml can't shadow qs.Ui's Panel.
+import ".." as Plugin
+import "../Api.js" as Api
 
 // Shared "test connection" widget — used by onboarding Step 2 (testing a
 // key the user just typed, not yet stored) and Settings' Authentication
-// "Test permissions" (testing the already-stored key). Runs the Health
-// probe from spec section 32 via curl.
+// "Test permissions" (testing the already-stored key).
 //
-// The API key is handed to curl through a header config file built from
-// an environment variable — never argv, so it never shows up in
-// `ps`/`/proc/<pid>/cmdline`. See curlConfigValue() for why the key is
-// scrubbed and escaped on the way in.
-//
-// Unraid's GraphQL API answers with HTTP 200 even on auth failure — the
-// real status lives in `errors[0].extensions.originalError.statusCode`,
-// with `data: null`. `curl -f` never sees a 4xx/5xx to fail on for that
-// case, so success/rejection is told apart by inspecting the JSON body,
-// not just the exit code. Confirmed against a real Unraid 7.2 box.
+// All the curl/keyring/parsing machinery lives in GraphQlRequest now, so
+// this file is just the health probe plus its status line.
 Column {
   id: root
 
   property string testState: "idle" // idle | testing | success | failure
   property string resultHostname: ""
   property string resultVersion: ""
-  property string failureReason: "" // "unreachable" | "rejected"
+  property string failureReason: "" // "unreachable" | "rejected" | "malformed"
   property string failureMessage: ""
+
+  // Set to reuse the key already in the keyring; leave empty to test a
+  // key passed straight into run().
+  property var secretStore: null
 
   signal succeeded(string hostname, string version)
   signal failed(string reason, string message)
 
-  // Assigning Process.environment REPLACES the process's entire
-  // environment rather than adding to it — this broke every real-world
-  // test (curl/bash lost PATH/HOME, among other things) until it was
-  // caught: see SecretStore.qml's sessionEnv() for the same fix and the
-  // reasoning behind it.
-  function sessionEnv(extra) {
-    var base = {
-      PATH: Quickshell.env("PATH"),
-      HOME: Quickshell.env("HOME"),
-      USER: Quickshell.env("USER"),
-      DBUS_SESSION_BUS_ADDRESS: Quickshell.env("DBUS_SESSION_BUS_ADDRESS"),
-      XDG_RUNTIME_DIR: Quickshell.env("XDG_RUNTIME_DIR"),
-      DISPLAY: Quickshell.env("DISPLAY"),
-      WAYLAND_DISPLAY: Quickshell.env("WAYLAND_DISPLAY")
-    }
-    for (var k in extra) base[k] = extra[k]
-    return base
-  }
-
-  // Pasting an API key very commonly brings a trailing newline along.
-  // Inside curl's config file that ends the `header = "..."` line early
-  // and leaves the closing quote alone on the next line, which curl
-  // reports as `config file option '"' is unknown` — the exact failure
-  // this hit against a real server. So drop everything that can't
-  // legitimately be part of a key, then escape the two characters curl's
-  // quoted-value syntax treats specially (it accepts `\\` and `\"`).
-  function curlConfigValue(key) {
-    var cleaned = String(key).replace(/[\r\n\t]/g, "").trim()
-    return cleaned.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
-  }
-
   function run(url, key) {
     root.testState = "testing"
     root.failureMessage = ""
-    var curlConfig = 'header = "x-api-key: ' + root.curlConfigValue(key) + '"\n' + 'header = "Content-Type: application/json"\n'
-    var query = JSON.stringify({ query: "{ online vars { name version } }" })
-    testProc.environment = root.sessionEnv({
-      "OMARCHY_UNRAID_CURL_CONFIG": curlConfig,
-      "OMARCHY_UNRAID_QUERY": query,
-      "OMARCHY_UNRAID_URL": url
-    })
-    // A real mktemp'd file for -K, not `-K <(...)` process substitution —
-    // the latter intermittently made curl misparse the config ("config
-    // file option '"' is unknown" on an unrelated later line) against a
-    // real server, not reproducible on every run, so it reads like a
-    // stream-vs-seekable-file edge case in curl's config parser rather
-    // than anything wrong with the config content itself. A real file
-    // sidesteps the whole class of issue; `trap ... EXIT` still keeps the
-    // key off disk for longer than one process's lifetime.
-    testProc.command = ["bash", "-c",
-      'CFGFILE=$(mktemp) && trap \'rm -f "$CFGFILE"\' EXIT && printf \'%s\' "$OMARCHY_UNRAID_CURL_CONFIG" > "$CFGFILE" && curl -fsS --max-time 6 -K "$CFGFILE" -X POST --data "$OMARCHY_UNRAID_QUERY" "$OMARCHY_UNRAID_URL"']
-    testProc.running = true
+    request.endpoint = url
+    request.send(Api.QUERY_HEALTH, key || "")
   }
 
   spacing: Style.space(8)
   width: parent ? parent.width : implicitWidth
+
+  Plugin.GraphQlRequest {
+    id: request
+    secretStore: root.secretStore
+
+    onSucceeded: function(data, errors) {
+      var vars = data && data.vars ? data.vars : null
+      if (data && data.online && vars) {
+        root.testState = "success"
+        root.resultHostname = vars.name || ""
+        root.resultVersion = vars.version || ""
+        root.succeeded(root.resultHostname, root.resultVersion)
+      } else {
+        root.testState = "failure"
+        root.failureReason = "rejected"
+        root.failureMessage = "Reachable, but the response didn't look like an Unraid GraphQL API."
+        root.failed(root.failureReason, root.failureMessage)
+      }
+    }
+
+    onFailed: function(reason, message) {
+      root.testState = "failure"
+      root.failureReason = reason
+      root.failureMessage = message
+      root.failed(reason, message)
+    }
+  }
 
   Row {
     spacing: Style.space(8)
@@ -117,95 +93,6 @@ Column {
       font.pixelSize: Style.font.bodySmall
       wrapMode: Text.WordWrap
       width: root.width
-    }
-  }
-
-  Process {
-    id: testProc
-
-    // `.text()` on a StdioCollector is only safe to call from that same
-    // collector's own onStreamFinished — calling it from Process.onExited
-    // threw "Property 'text' ... is not a function" against a real server
-    // (the collector isn't guaranteed to have finished flushing by then).
-    // So each collector caches its own text, onExited only records the
-    // exit code, and _finish() runs once all three have reported in,
-    // regardless of what order they arrive in.
-    property int lastExitCode: -1
-    property string lastStdout: ""
-    property string lastStderr: ""
-    property bool _exited: false
-    property bool _stdoutDone: false
-    property bool _stderrDone: false
-
-    function _finish() {
-      if (!_exited || !_stdoutDone || !_stderrDone) return
-      _exited = false
-      _stdoutDone = false
-      _stderrDone = false
-
-      var exitCode = testProc.lastExitCode
-      if (exitCode === 0 || exitCode === 22) {
-        var parsed = null
-        try { parsed = JSON.parse(testProc.lastStdout) } catch (e) { parsed = null }
-        var vars = parsed && parsed.data && parsed.data.vars ? parsed.data.vars : null
-        var firstError = parsed && parsed.errors && parsed.errors.length > 0 ? parsed.errors[0] : null
-        var errorStatus = firstError && firstError.extensions && firstError.extensions.originalError
-          ? firstError.extensions.originalError.statusCode : null
-
-        if (parsed && parsed.data && parsed.data.online && vars) {
-          root.testState = "success"
-          root.resultHostname = vars.name || ""
-          root.resultVersion = vars.version || ""
-          root.succeeded(root.resultHostname, root.resultVersion)
-        } else if (firstError && (errorStatus === 401 || errorStatus === 403)) {
-          root.testState = "failure"
-          root.failureReason = "rejected"
-          root.failureMessage = "The server rejected the API key (" + firstError.message + ")."
-          root.failed(root.failureReason, root.failureMessage)
-        } else if (firstError) {
-          root.testState = "failure"
-          root.failureReason = "rejected"
-          root.failureMessage = "The server responded with an error: " + firstError.message
-          root.failed(root.failureReason, root.failureMessage)
-        } else {
-          root.testState = "failure"
-          root.failureReason = "rejected"
-          root.failureMessage = "Reachable, but the response didn't look like an Unraid GraphQL API."
-          root.failed(root.failureReason, root.failureMessage)
-        }
-      } else {
-        root.testState = "failure"
-        root.failureReason = "unreachable"
-        var stderrText = testProc.lastStderr.trim()
-        root.failureMessage = "Could not reach the server at that address."
-          + (stderrText !== "" ? " (" + stderrText + ")" : " (curl exit " + exitCode + ")")
-        root.failed(root.failureReason, root.failureMessage)
-      }
-    }
-
-    onExited: function(exitCode) {
-      testProc.lastExitCode = exitCode
-      testProc._exited = true
-      testProc._finish()
-    }
-
-    stdout: StdioCollector {
-      id: outCollector
-      waitForEnd: true
-      onStreamFinished: {
-        testProc.lastStdout = text
-        testProc._stdoutDone = true
-        testProc._finish()
-      }
-    }
-    stderr: StdioCollector {
-      id: errCollector
-      waitForEnd: true
-      onStreamFinished: {
-        testProc.lastStderr = text
-        testProc._stderrDone = true
-        testProc._finish()
-      }
     }
   }
 }
