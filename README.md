@@ -3,16 +3,21 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: Milestone 4 — live data.** Onboarding saves a real server URL and
+**Status: Milestone 5 — Docker controls.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
 and notifications. Verified against Unraid 7.3.2 / API 4.37.3.
 
-Still to come: container/VM controls and detail views (Milestones 5–6), the
-LAN/Tailscale connection manager with failover and offline caching
-(Milestone 3, deliberately deferred), and desktop notifications
-(Milestone 7).
+Clicking a container opens a detail view with Start / Stop / Restart,
+Open WebUI and a log viewer. Controlling containers needs an API key with
+Docker update permission (Unraid → Settings → Management Access → API
+Keys); a read-only key still gets everything else, and the controls say so
+instead of failing silently.
+
+Still to come: VM controls (Milestone 6), the LAN/Tailscale connection
+manager with failover and offline caching (Milestone 3, deliberately
+deferred), and desktop notifications (Milestone 7).
 
 ## Requirements
 
@@ -29,7 +34,8 @@ LAN/Tailscale connection manager with failover and offline caching
   failure, unreachable).
 - Overview: array state, capacity, CPU/RAM, parity progress, recent
   notifications, and working WebUI / Terminal / Refresh actions.
-- Docker: live container list with state, update badges and search.
+- Docker: live container list with state, update badges and search, plus a
+  per-container detail view with controls and logs.
 - VMs, Storage (incl. disabled/missing/invalid disk counts) and Alerts
   (click a notification to open it in the Unraid WebUI).
 - Settings: live Unraid/API version and uptime, plus editing the server
@@ -82,6 +88,6 @@ omarchy restart shell
 
 ## Roadmap
 
-See the project plan for the full milestone breakdown. Next up (Milestone 5):
-container controls — start/stop/restart with confirmations, plus logs and
-a container detail view.
+See the project plan for the full milestone breakdown. Next up (Milestone 6):
+VM controls — start, stop, reboot, pause/resume and force stop, with the
+stronger confirmation force stop deserves.
