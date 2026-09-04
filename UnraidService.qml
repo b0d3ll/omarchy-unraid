@@ -46,6 +46,51 @@ Item {
 
   readonly property var sortedContainers: Model.sortContainers(docker.containers)
 
+  function containerById(id) {
+    var list = docker.containers || []
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]
+    return null
+  }
+
+  // ------------------------------------------------------- docker actions
+  //
+  // One place that runs a mutation and then re-reads the truth (spec
+  // section 45): lock, mutate, refresh, report. The reply's own state
+  // field is ignored on purpose — a container mid-restart reports
+  // whatever it happens to be at that instant, so the next Docker poll is
+  // the authority.
+
+  // { id, kind } while an action is in flight, so exactly the pressed
+  // button shows its pending label and its siblings lock.
+  property var dockerActionPending: null
+  // Latched once the server refuses a control: the key is read-only, and
+  // that won't change until the user grants it Docker update permission,
+  // so there's no point leaving the buttons armed (spec section 39).
+  property bool dockerControlsForbidden: false
+
+  signal dockerActionFinished(string name, string kind, bool ok, string message)
+
+  function dockerAction(kind, container) {
+    if (!container || dockerActionPending || dockerControlsForbidden) return
+    var query = kind === "start" ? Api.mutationDockerStart(container.id)
+      : kind === "stop" ? Api.mutationDockerStop(container.id)
+      : kind === "restart" ? Api.mutationDockerRestart(container.id)
+      : ""
+    if (query === "") return
+
+    dockerActionPending = { id: container.id, kind: kind, name: container.name }
+    actionRequest.send(query)
+  }
+
+  readonly property var logs: Api.normalizeLogs(logsQuery.result)
+  readonly property bool logsFailing: logsQuery.failing && !logsQuery.hasData
+  readonly property string logsErrorMessage: logsFailing ? logsQuery.errorMessage : ""
+
+  // Set by the panel while the logs view is open; drives both the query
+  // and whether it polls at all (spec section 20: only while open).
+  property string logsContainerId: ""
+  function refreshLogs() { logsQuery.refresh() }
+
   readonly property string dockerErrorMessage:
     (!docker.available && dockerQuery.failing) ? dockerQuery.errorMessage : ""
   readonly property string vmsErrorMessage:
@@ -110,6 +155,57 @@ Item {
   function refreshNotifications() { notificationsQuery.refresh() }
 
   // ------------------------------------------------------------- resources
+
+  GraphQlRequest {
+    id: actionRequest
+    endpoint: root.endpoint
+    secretStore: root.secretStore
+
+    onSucceeded: function(data, errors) {
+      var pending = root.dockerActionPending || ({})
+      root.dockerActionPending = null
+      // Mutations answer HTTP 200 with an errors array on refusal, so a
+      // reply arriving is not the same as the action having happened.
+      var first = errors && errors.length > 0 ? errors[0] : null
+      if (first) {
+        root._reportActionFailure(pending, first.message,
+          first.extensions ? first.extensions.code : "")
+        return
+      }
+      dockerQuery.refresh()
+      root.dockerActionFinished(pending.name || "Container", pending.kind || "", true, "")
+    }
+
+    onFailed: function(reason, message) {
+      var pending = root.dockerActionPending || ({})
+      root.dockerActionPending = null
+      root._reportActionFailure(pending, message, reason === "rejected" ? "REJECTED" : "")
+    }
+  }
+
+  function _reportActionFailure(pending, message, code) {
+    var forbidden = /forbidden|not allowed|permission/i.test(message || "")
+      || code === "FORBIDDEN"
+    if (forbidden) {
+      root.dockerControlsForbidden = true
+      root.dockerActionFinished(pending.name || "Container", pending.kind || "", false,
+        "The API key isn't allowed to control Docker.")
+      return
+    }
+    root.dockerActionFinished(pending.name || "Container", pending.kind || "", false, message)
+  }
+
+  ResourceQuery {
+    id: logsQuery
+    queryString: root.logsContainerId !== "" ? Api.queryDockerLogs(root.logsContainerId, 100) : ""
+    endpoint: root.endpoint
+    secretStore: root.secretStore
+    // Only alive while the logs view has a container selected.
+    active: root.active && root.logsContainerId !== ""
+    panelOpen: root.panelOpen
+    intervalOpen: 5000
+    intervalClosed: 0
+  }
 
   // Versions and boot time don't change while the shell runs, so the
   // system query has no interval — it runs on connect and manual refresh.

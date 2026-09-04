@@ -32,11 +32,21 @@ Panel {
     panelOpen: root.opened && !root.inFullPanelFlow
   }
 
-  // "loading" | "setup" | "overview" | "docker" | "vms" | "storage" |
-  // "alerts" | "settings". Not a tab-index because Settings is reached via
-  // the gear, not the tab row (spec section 9), and setup/loading replace
-  // the whole panel body (header + tabs included) rather than being a tab.
+  // "loading" | "setup" | "overview" | "docker" | "dockerDetail" |
+  // "dockerLogs" | "vms" | "storage" | "alerts" | "settings". Not a
+  // tab-index because Settings is reached via the gear, not the tab row
+  // (spec section 9), and setup/loading replace the whole panel body
+  // (header + tabs included) rather than being a tab.
   property string activeView: "loading"
+
+  // Which container the Docker subviews are showing.
+  property string selectedContainerId: ""
+
+  // The Docker tab stays lit while you're inside one of its subviews.
+  function tabIsActive(key) {
+    if (key === "docker") return activeView.indexOf("docker") === 0
+    return activeView === key
+  }
 
   // Decided once, the first time both stores finish their async startup
   // read (FileView load, secret-tool presence check) — not a live
@@ -113,16 +123,29 @@ Panel {
     }
   }
 
-  // Spec section 37: entering a view refreshes that view's resource at once.
+  // Spec section 37: entering a view refreshes that view's resource at
+  // once. Leaving the logs view clears the container id, which is what
+  // stops the 5-second log polling (spec section 20).
   onActiveViewChanged: {
+    service.logsContainerId = activeView === "dockerLogs" ? selectedContainerId : ""
     if (!service.active) return
     switch (activeView) {
       case "overview": service.refreshMetrics(); service.refreshArray(); break
-      case "docker": service.refreshDocker(); break
+      case "docker":
+      case "dockerDetail": service.refreshDocker(); break
       case "vms": service.refreshVms(); break
       case "storage": service.refreshArray(); break
       case "alerts": service.refreshNotifications(); break
     }
+  }
+
+  // Raised by a view that wants confirmation before acting (spec section
+  // 19); the dialog itself is shared, so it carries what to do on confirm.
+  property var pendingConfirm: null
+
+  function askConfirm(message, confirmText, action) {
+    pendingConfirm = { message: message, confirmText: confirmText, action: action }
+    confirmDialog.opened = true
   }
 
   implicitWidth: widgetButton.implicitWidth
@@ -262,7 +285,7 @@ Panel {
                     ? modelData.label + " (" + root.service.unreadNotificationCount + ")"
                     : modelData.label
                   bordered: true
-                  selected: root.activeView === modelData.key
+                  selected: root.tabIsActive(modelData.key)
                   foreground: root.barForeground
                   onClicked: root.activeView = modelData.key
                 }
@@ -288,6 +311,8 @@ Panel {
             sourceComponent: {
               switch (root.activeView) {
                 case "docker": return dockerViewComponent
+                case "dockerDetail": return dockerDetailViewComponent
+                case "dockerLogs": return dockerLogsViewComponent
                 case "vms": return vmsViewComponent
                 case "storage": return storageViewComponent
                 case "alerts": return alertsViewComponent
@@ -300,16 +325,24 @@ Panel {
       }
     }
 
+    // Shared by the disk-details warning and the Docker stop/restart
+    // confirmations — whatever raised it supplies the message and what to
+    // run on confirm.
     ConfirmDialog {
-      id: diskConfirm
+      id: confirmDialog
       anchors.fill: parent
-      message: "Disk details\n\nSome current Unraid API versions may wake sleeping HDDs when detailed disk information is requested."
+      message: root.pendingConfirm ? root.pendingConfirm.message : ""
       cancelText: "Cancel"
-      confirmText: "Load details"
-      onCanceled: diskConfirm.opened = false
+      confirmText: root.pendingConfirm ? root.pendingConfirm.confirmText : "Confirm"
+      onCanceled: {
+        confirmDialog.opened = false
+        root.pendingConfirm = null
+      }
       onConfirmed: {
-        diskConfirm.opened = false
-        toast.show("Disk details view is coming once background polling is added.")
+        var action = root.pendingConfirm ? root.pendingConfirm.action : null
+        confirmDialog.opened = false
+        root.pendingConfirm = null
+        if (action) action()
       }
     }
 
@@ -318,6 +351,19 @@ Panel {
       anchors.bottom: parent.bottom
       anchors.bottomMargin: Style.space(16)
       anchors.horizontalCenter: parent.horizontalCenter
+    }
+  }
+
+  // Spec section 45: report the outcome once the server has confirmed it.
+  Connections {
+    target: root.service
+    function onDockerActionFinished(name, kind, ok, message) {
+      if (ok) {
+        var verb = kind === "start" ? "started" : kind === "stop" ? "stopped" : "restarted"
+        toast.show(name + " " + verb)
+      } else {
+        toast.show(message !== "" ? message : name + " could not be " + kind + "ed")
+      }
     }
   }
 
@@ -361,6 +407,36 @@ Panel {
       service: root.service
       foreground: root.barForeground
       onToastRequested: function(message) { toast.show(message) }
+      onContainerSelected: function(containerId) {
+        root.selectedContainerId = containerId
+        root.activeView = "dockerDetail"
+      }
+    }
+  }
+
+  Component {
+    id: dockerDetailViewComponent
+    DockerDetailView {
+      service: root.service
+      containerId: root.selectedContainerId
+      foreground: root.barForeground
+      onBackRequested: root.activeView = "docker"
+      onLogsRequested: root.activeView = "dockerLogs"
+      onConfirmRequested: function(message, confirmText, kind) {
+        root.askConfirm(message, confirmText, function() {
+          root.service.dockerAction(kind, root.service.containerById(root.selectedContainerId))
+        })
+      }
+    }
+  }
+
+  Component {
+    id: dockerLogsViewComponent
+    DockerLogsView {
+      service: root.service
+      containerId: root.selectedContainerId
+      foreground: root.barForeground
+      onBackRequested: root.activeView = "dockerDetail"
     }
   }
 
@@ -378,7 +454,10 @@ Panel {
     StorageView {
       service: root.service
       foreground: root.barForeground
-      onLoadDiskDetailsRequested: diskConfirm.opened = true
+      onLoadDiskDetailsRequested: root.askConfirm(
+        "Disk details\n\nSome current Unraid API versions may wake sleeping HDDs when detailed disk information is requested.",
+        "Load details",
+        function() { toast.show("Disk details view is coming once background polling is added.") })
     }
   }
 

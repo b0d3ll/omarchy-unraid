@@ -19,9 +19,12 @@ if [[ ! -f $API_FILE ]]; then
   exit 1
 fi
 
-# Only the query constants matter; comments in this file legitimately
-# mention the forbidden paths while explaining why they're forbidden.
-queries=$(grep -E '^var QUERY_' -A 4 "$API_FILE" | grep -v '^\s*//')
+# Scan every GraphQL string in the file, not just the `var QUERY_`
+# constants: operations are also built inside functions now (logs,
+# mutations), and a check that only looked at the constants would silently
+# stop covering anything added later. Comments are stripped first, since
+# this file legitimately names the forbidden paths while explaining them.
+queries=$(sed -e 's://.*::' "$API_FILE" | grep -oE '"[^"]*"' | grep -E '\{|\}|mutation')
 
 check() {
   local pattern="$1" label="$2"
@@ -40,7 +43,7 @@ check '\bsmart\b|\bSmart\b' "SMART data"
 # The queries must also stay in separate operations per resource root
 # (spec section 36): one operation asking for docker AND vms AND array
 # means one unavailable subsystem can take the others down with it.
-if grep -E '^var QUERY_' "$API_FILE" | grep -q 'docker.*vms\|vms.*docker'; then
+if grep -q 'docker.*vms\|vms.*docker' <<<"$queries"; then
   echo "FAIL: docker and vms share one operation — a single outage would break both (spec section 36)" >&2
   status=1
 else

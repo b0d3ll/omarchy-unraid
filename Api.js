@@ -42,6 +42,59 @@ var QUERY_VMS = "{ vms { domains { id name state } } }"
 var QUERY_NOTIFICATIONS = "{ notifications { overview { unread { info warning alert total } } "
   + "warningsAndAlerts { id title subject description importance link timestamp formattedTimestamp } } }"
 
+// ------------------------------------------------------- docker operations
+//
+// Container ids are composite ("<serverId>:<containerId>"), so they're
+// embedded with JSON.stringify rather than string-concatenated — that
+// escapes anything in the id instead of letting it break the document.
+//
+// The mutations return a full DockerContainer (id/state/status/names are
+// all valid on it, verified against a real server). The reply is still
+// only used for its error status: spec section 45 wants the new state
+// confirmed by re-reading the resource, not taken from the mutation.
+
+function mutationDockerStart(id) {
+  return "mutation { docker { start(id: " + JSON.stringify(id) + ") { id state status } } }"
+}
+
+function mutationDockerStop(id) {
+  return "mutation { docker { stop(id: " + JSON.stringify(id) + ") { id state status } } }"
+}
+
+function mutationDockerRestart(id) {
+  return "mutation { docker { restart(id: " + JSON.stringify(id) + ") { id state status } } }"
+}
+
+// Logs are readable with a plain read-only key, unlike the mutations above.
+function queryDockerLogs(id, tail) {
+  var lines = num(tail, 100)
+  return "{ docker { logs(id: " + JSON.stringify(id) + ", tail: " + lines + ") "
+    + "{ cursor lines { timestamp message } } } }"
+}
+
+function normalizeLogs(data) {
+  var logs = (data && data.docker && data.docker.logs) || null
+  if (!logs) return { available: false, lines: [] }
+  return {
+    available: true,
+    cursor: logs.cursor || "",
+    lines: (logs.lines || []).map(function(line) {
+      return {
+        timestamp: line.timestamp ? Date.parse(line.timestamp) : null,
+        message: line.message || ""
+      }
+    })
+  }
+}
+
+// "13:23:04" for a log line's gutter.
+function clockTime(timestampMs) {
+  if (!timestampMs) return "--:--:--"
+  var d = new Date(timestampMs)
+  function pad(n) { return (n < 10 ? "0" : "") + n }
+  return pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds())
+}
+
 // ---------------------------------------------------------------- helpers
 
 function num(value, fallback) {

@@ -14,6 +14,7 @@ Column {
   property color foreground: Color.foreground
 
   signal toastRequested(string message)
+  signal containerSelected(string containerId)
 
   readonly property var _docker: service ? service.docker : ({ available: false, containers: [] })
   readonly property var _sorted: service ? service.sortedContainers : []
@@ -161,7 +162,7 @@ Column {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: root.toastRequested("Container detail view is coming in Milestone 5.")
+          onClicked: root.containerSelected(row.modelData.id)
         }
       }
     }
