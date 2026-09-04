@@ -76,10 +76,16 @@ Panel {
     if (service.unreachable) return "OFFLINE"
     var array = service.arrayInfo
     var parity = array.parityCheckStatus || ({})
-    if ((array.disabled || 0) > 0 || (array.missing || 0) > 0) return "CRITICAL"
+    // A missing disk is unambiguous — the drive isn't there. Disabled and
+    // invalid disks are not: they're also what a routine disk-clear or
+    // rebuild looks like while it runs, so they're a notice rather than an
+    // alarm. The label still names the actual condition, so nothing is
+    // hidden, only de-escalated.
+    if ((array.missing || 0) > 0) return "CRITICAL"
     if (service.notificationSummary.unread.alert > 0) return "CRITICAL"
-    if ((array.invalid || 0) > 0 || (parity.errors || 0) > 0) return "WARNING"
+    if ((parity.errors || 0) > 0) return "WARNING"
     if (service.notificationSummary.unread.warning > 0) return "WARNING"
+    if ((array.disabled || 0) > 0 || (array.invalid || 0) > 0) return "NOTICE"
     if (parity.running || (array.state !== "" && array.state !== "STARTED")) return "NOTICE"
     if (!service.everLoaded) return "CONNECTING"
     return "HEALTHY"
@@ -93,11 +99,12 @@ Panel {
       case "AUTH_ERROR": return "API key rejected"
       case "OFFLINE": return "Unreachable"
       case "CRITICAL":
-        if ((array.disabled || 0) > 0) return "Array disk disabled"
         if ((array.missing || 0) > 0) return "Array disk missing"
         return "Alert needs attention"
       case "WARNING": return "Attention needed"
       case "NOTICE":
+        if ((array.disabled || 0) > 0) return "Array disk disabled"
+        if ((array.invalid || 0) > 0) return "Array disk rebuilding"
         if (parity.running) return "Parity check running"
         if (array.state !== "" && array.state !== "STARTED") return "Array " + array.state.toLowerCase()
         return "Notice"

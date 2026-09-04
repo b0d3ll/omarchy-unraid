@@ -27,7 +27,13 @@ Column {
 
   readonly property int _diskProblems:
     (root._array.disabled || 0) + (root._array.missing || 0) + (root._array.invalid || 0)
-  readonly property bool _attention: root._unread > 0 || root._diskProblems > 0 || (root._parity.errors || 0) > 0
+  // Disabled/invalid disks are also what a routine clear or rebuild looks
+  // like, so they get the calmer treatment; a missing disk, unread
+  // warnings and parity errors keep the urgent one.
+  readonly property bool _urgent: root._unread > 0
+    || (root._array.missing || 0) > 0
+    || (root._parity.errors || 0) > 0
+  readonly property bool _attention: root._urgent || root._diskProblems > 0
 
   function fmt(value, digits, suffix) {
     if (value === null || value === undefined || isNaN(value)) return "—"
@@ -45,8 +51,8 @@ Column {
 
     Text {
       textFormat: Text.PlainText
-      text: "ATTENTION NEEDED"
-      color: Color.urgent
+      text: root._urgent ? "ATTENTION NEEDED" : "ARRAY MAINTENANCE"
+      color: root._urgent ? Color.urgent : Color.accent
       font.family: Style.font.family
       font.pixelSize: Style.font.body
       font.bold: true
@@ -86,9 +92,10 @@ Column {
     MetricCard {
       width: (parent.width - Style.space(16)) / 2
       label: "Array"
-      statusState: root._array.state === "STARTED"
-        ? (root._diskProblems > 0 ? "CRITICAL" : "HEALTHY")
-        : "NOTICE"
+      statusState: root._array.state !== "STARTED" ? "NOTICE"
+        : (root._array.missing || 0) > 0 ? "CRITICAL"
+        : root._diskProblems > 0 ? "NOTICE"
+        : "HEALTHY"
       headline: root._array.state === "STARTED" ? "Started" : (root._array.state || "—")
       subline: root._diskProblems > 0
         ? root._diskProblems + " disk(s) need attention"
