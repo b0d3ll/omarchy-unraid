@@ -28,6 +28,28 @@ Column {
     return { baseUrl: trimmed, graphqlUrl: graphqlUrl }
   }
 
+  function saveServer() {
+    if (root.editServerInput.trim() === "") return
+    var normalized = root.normalizeAddress(root.editServerInput)
+    root.configStore.save({ serverUrl: normalized.baseUrl, graphqlUrl: normalized.graphqlUrl })
+    root.editingServer = false
+  }
+
+  function testKey() {
+    if (root.editKeyInput.trim() === "" || testWidget.testState === "testing") return
+    testWidget.run(root.configStore.graphqlUrl, root.editKeyInput)
+  }
+
+  function saveKey() {
+    if (testWidget.testState !== "success") return
+    root.secretStore.store(root.editKeyInput, function(ok) {
+      if (ok) {
+        root.configStore.save({ hostname: testWidget.resultHostname, unraidVersion: testWidget.resultVersion })
+        root.editingKey = false
+      }
+    })
+  }
+
   width: parent ? parent.width : implicitWidth
   spacing: Style.space(16)
 
@@ -101,6 +123,7 @@ Column {
         text: root.editServerInput
         foreground: root.foreground
         onTextChanged: root.editServerInput = text
+        onAccepted: root.saveServer()
       }
 
       Row {
@@ -111,11 +134,7 @@ Column {
           bordered: true
           foreground: root.foreground
           enabled: root.editServerInput.trim() !== ""
-          onClicked: {
-            var normalized = root.normalizeAddress(root.editServerInput)
-            root.configStore.save({ serverUrl: normalized.baseUrl, graphqlUrl: normalized.graphqlUrl })
-            root.editingServer = false
-          }
+          onClicked: root.saveServer()
         }
 
         Button {
@@ -184,6 +203,7 @@ Column {
         text: root.editKeyInput
         foreground: root.foreground
         onTextChanged: root.editKeyInput = text
+        onAccepted: testWidget.testState === "success" ? root.saveKey() : root.testKey()
       }
 
       Row {
@@ -194,7 +214,7 @@ Column {
           bordered: true
           foreground: root.foreground
           enabled: root.editKeyInput.trim() !== "" && testWidget.testState !== "testing"
-          onClicked: testWidget.run(root.configStore.graphqlUrl, root.editKeyInput)
+          onClicked: root.testKey()
         }
 
         Button {
@@ -202,14 +222,7 @@ Column {
           bordered: true
           foreground: root.foreground
           enabled: testWidget.testState === "success"
-          onClicked: {
-            root.secretStore.store(root.editKeyInput, function(ok) {
-              if (ok) {
-                root.configStore.save({ hostname: testWidget.resultHostname, unraidVersion: testWidget.resultVersion })
-                root.editingKey = false
-              }
-            })
-          }
+          onClicked: root.saveKey()
         }
 
         Button {

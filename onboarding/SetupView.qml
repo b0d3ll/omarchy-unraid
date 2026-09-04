@@ -38,6 +38,45 @@ Column {
     return { baseUrl: trimmed, graphqlUrl: graphqlUrl }
   }
 
+  // Shared between the buttons' onClicked and each field's onAccepted (so
+  // pressing Enter does the same thing as clicking the button next to it,
+  // and still respects the same enabled/validation gate).
+  function goToStep2() {
+    if (root.addressInput.trim() === "") return
+    var normalized = root.normalizeAddress(root.addressInput)
+    root.pendingBaseUrl = normalized.baseUrl
+    root.pendingGraphqlUrl = normalized.graphqlUrl
+    root.keyInput = ""
+    connectionTest.testState = "idle"
+    root.step = 2
+  }
+
+  function runTest() {
+    if (root.keyInput.trim() === "" || connectionTest.testState === "testing") return
+    connectionTest.run(root.pendingGraphqlUrl, root.keyInput)
+  }
+
+  function saveAndFinish() {
+    if (connectionTest.testState !== "success" || root.saving) return
+    root.saving = true
+    root.saveError = ""
+    root.secretStore.store(root.keyInput, function(ok) {
+      root.saving = false
+      if (!ok) {
+        root.saveError = "Could not save the API key to the system keyring."
+        return
+      }
+      root.configStore.save({
+        serverUrl: root.pendingBaseUrl,
+        graphqlUrl: root.pendingGraphqlUrl,
+        hostname: connectionTest.resultHostname,
+        unraidVersion: connectionTest.resultVersion,
+        lastTestedAt: new Date().toISOString()
+      })
+      root.step = 3
+    })
+  }
+
   width: parent ? parent.width : implicitWidth
   spacing: Style.space(16)
 
@@ -64,6 +103,7 @@ Column {
       text: root.addressInput
       foreground: root.foreground
       onTextChanged: root.addressInput = text
+      onAccepted: root.goToStep2()
     }
 
     Button {
@@ -71,14 +111,7 @@ Column {
       bordered: true
       foreground: root.foreground
       enabled: root.addressInput.trim() !== ""
-      onClicked: {
-        var normalized = root.normalizeAddress(root.addressInput)
-        root.pendingBaseUrl = normalized.baseUrl
-        root.pendingGraphqlUrl = normalized.graphqlUrl
-        root.keyInput = ""
-        connectionTest.testState = "idle"
-        root.step = 2
-      }
+      onClicked: root.goToStep2()
     }
   }
 
@@ -112,6 +145,7 @@ Column {
       text: root.keyInput
       foreground: root.foreground
       onTextChanged: root.keyInput = text
+      onAccepted: connectionTest.testState === "success" ? root.saveAndFinish() : root.runTest()
     }
 
     Text {
@@ -133,7 +167,7 @@ Column {
         bordered: true
         foreground: root.foreground
         enabled: root.keyInput.trim() !== "" && connectionTest.testState !== "testing"
-        onClicked: connectionTest.run(root.pendingGraphqlUrl, root.keyInput)
+        onClicked: root.runTest()
       }
 
       Button {
@@ -148,25 +182,7 @@ Column {
         bordered: true
         foreground: root.foreground
         enabled: connectionTest.testState === "success" && !root.saving
-        onClicked: {
-          root.saving = true
-          root.saveError = ""
-          root.secretStore.store(root.keyInput, function(ok) {
-            root.saving = false
-            if (!ok) {
-              root.saveError = "Could not save the API key to the system keyring."
-              return
-            }
-            root.configStore.save({
-              serverUrl: root.pendingBaseUrl,
-              graphqlUrl: root.pendingGraphqlUrl,
-              hostname: connectionTest.resultHostname,
-              unraidVersion: connectionTest.resultVersion,
-              lastTestedAt: new Date().toISOString()
-            })
-            root.step = 3
-          })
-        }
+        onClicked: root.saveAndFinish()
       }
     }
 
