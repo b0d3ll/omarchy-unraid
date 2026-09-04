@@ -8,12 +8,10 @@ import Quickshell.Io
 // "Test permissions" (testing the already-stored key). Runs the Health
 // probe from spec section 32 via curl.
 //
-// The API key is handed to curl through a header config file supplied via
-// bash process substitution (`-K <(...)`), built from an environment
-// variable — never argv, so it never shows up in `ps`/`/proc/<pid>/cmdline`.
-// Known limitation: a key containing a literal `"` would break curl's own
-// config-file quoting; Unraid API keys are opaque tokens and don't, so
-// this isn't handled specially.
+// The API key is handed to curl through a header config file built from
+// an environment variable — never argv, so it never shows up in
+// `ps`/`/proc/<pid>/cmdline`. See curlConfigValue() for why the key is
+// scrubbed and escaped on the way in.
 //
 // Unraid's GraphQL API answers with HTTP 200 even on auth failure — the
 // real status lives in `errors[0].extensions.originalError.statusCode`,
@@ -51,10 +49,22 @@ Column {
     return base
   }
 
+  // Pasting an API key very commonly brings a trailing newline along.
+  // Inside curl's config file that ends the `header = "..."` line early
+  // and leaves the closing quote alone on the next line, which curl
+  // reports as `config file option '"' is unknown` — the exact failure
+  // this hit against a real server. So drop everything that can't
+  // legitimately be part of a key, then escape the two characters curl's
+  // quoted-value syntax treats specially (it accepts `\\` and `\"`).
+  function curlConfigValue(key) {
+    var cleaned = String(key).replace(/[\r\n\t]/g, "").trim()
+    return cleaned.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+  }
+
   function run(url, key) {
     root.testState = "testing"
     root.failureMessage = ""
-    var curlConfig = 'header = "x-api-key: ' + key + '"\n' + 'header = "Content-Type: application/json"\n'
+    var curlConfig = 'header = "x-api-key: ' + root.curlConfigValue(key) + '"\n' + 'header = "Content-Type: application/json"\n'
     var query = JSON.stringify({ query: "{ online vars { name version } }" })
     testProc.environment = root.sessionEnv({
       "OMARCHY_UNRAID_CURL_CONFIG": curlConfig,

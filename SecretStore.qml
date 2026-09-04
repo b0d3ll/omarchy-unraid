@@ -43,10 +43,19 @@ Item {
     return base
   }
 
+  // An API key never legitimately contains whitespace, and a pasted one
+  // often carries a trailing newline — which then breaks the curl config
+  // file the connection test builds. Scrub it here so nothing downstream
+  // ever sees it, on both the way in and the way back out (so a key
+  // stored dirty by an earlier version self-heals on read).
+  function sanitizeKey(key) {
+    return String(key).replace(/[\r\n\t]/g, "").trim()
+  }
+
   function store(key, onDone) {
     storeProc.command = ["bash", "-c",
       "printf '%s' \"$OMARCHY_UNRAID_SECRET\" | secret-tool store --label=\"" + root.label + "\" service " + root.serviceId + " account default"]
-    storeProc.environment = root.sessionEnv({ "OMARCHY_UNRAID_SECRET": key })
+    storeProc.environment = root.sessionEnv({ "OMARCHY_UNRAID_SECRET": root.sanitizeKey(key) })
     storeProc._onDone = onDone || null
     storeProc.running = true
   }
@@ -85,7 +94,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var value = text
+        var value = root.sanitizeKey(text)
         if (fetchProc._callback) fetchProc._callback(value)
         fetchProc._callback = null
       }

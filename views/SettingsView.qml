@@ -20,6 +20,12 @@ Column {
   property bool editingKey: false
   property string editKeyInput: ""
 
+  // See SetupView's cleanInput(): a pasted value can carry newlines, and
+  // a newline in the API key breaks the curl config the test builds.
+  function cleanInput(value) {
+    return String(value).replace(/[\r\n\t]/g, "")
+  }
+
   function normalizeAddress(input) {
     var trimmed = (input || "").trim().replace(/\/+$/, "")
     if (trimmed === "") return { baseUrl: "", graphqlUrl: "" }
@@ -122,7 +128,11 @@ Column {
         width: parent.width
         text: root.editServerInput
         foreground: root.foreground
-        onTextChanged: root.editServerInput = text
+        onTextChanged: {
+          var cleaned = root.cleanInput(text)
+          if (cleaned !== text) text = cleaned
+          root.editServerInput = cleaned
+        }
         onAccepted: root.saveServer()
       }
 
@@ -202,7 +212,11 @@ Column {
         password: true
         text: root.editKeyInput
         foreground: root.foreground
-        onTextChanged: root.editKeyInput = text
+        onTextChanged: {
+          var cleaned = root.cleanInput(text)
+          if (cleaned !== text) text = cleaned
+          root.editKeyInput = cleaned
+        }
         onAccepted: testWidget.testState === "success" ? root.saveKey() : root.testKey()
       }
 

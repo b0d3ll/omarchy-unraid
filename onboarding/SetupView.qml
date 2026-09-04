@@ -30,6 +30,12 @@ Column {
   property bool saving: false
   property string saveError: ""
 
+  // Pasting into a single-line field can carry newlines along; strip them
+  // at the boundary so what the field shows is what actually gets used.
+  function cleanInput(value) {
+    return String(value).replace(/[\r\n\t]/g, "")
+  }
+
   function normalizeAddress(input) {
     var trimmed = (input || "").trim().replace(/\/+$/, "")
     if (trimmed === "") return { baseUrl: "", graphqlUrl: "" }
@@ -102,7 +108,11 @@ Column {
       width: parent.width
       text: root.addressInput
       foreground: root.foreground
-      onTextChanged: root.addressInput = text
+      onTextChanged: {
+        var cleaned = root.cleanInput(text)
+        if (cleaned !== text) text = cleaned
+        root.addressInput = cleaned
+      }
       onAccepted: root.goToStep2()
     }
 
@@ -144,7 +154,11 @@ Column {
       password: true
       text: root.keyInput
       foreground: root.foreground
-      onTextChanged: root.keyInput = text
+      onTextChanged: {
+        var cleaned = root.cleanInput(text)
+        if (cleaned !== text) text = cleaned
+        root.keyInput = cleaned
+      }
       onAccepted: connectionTest.testState === "success" ? root.saveAndFinish() : root.runTest()
     }
 
