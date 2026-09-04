@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.b0d3ll.omarchy-unraid",
+  "name": "Unraid Companion",
+  "version": "0.1.0",
+  "author": "b0d3ll",
+  "license": "MIT",
+  "description": "Monitor and control Unraid from the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Unraid",
+    "description": "Monitor and control Unraid from the Omarchy bar.",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
