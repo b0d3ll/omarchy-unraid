@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 
 // API key storage via the Secret Service (spec section 40) — verified
@@ -22,10 +23,30 @@ Item {
   property bool checked: false
   property bool present: false
 
+  // Assigning Process.environment REPLACES the process's entire
+  // environment rather than adding to it — confirmed by reproducing the
+  // failure directly: `secret-tool` needs DBUS_SESSION_BUS_ADDRESS to
+  // reach the session's Secret Service and fails with "Cannot autolaunch
+  // D-Bus" without it. Every Process that needs a custom env var has to
+  // layer it on top of this, not replace the environment outright.
+  function sessionEnv(extra) {
+    var base = {
+      PATH: Quickshell.env("PATH"),
+      HOME: Quickshell.env("HOME"),
+      USER: Quickshell.env("USER"),
+      DBUS_SESSION_BUS_ADDRESS: Quickshell.env("DBUS_SESSION_BUS_ADDRESS"),
+      XDG_RUNTIME_DIR: Quickshell.env("XDG_RUNTIME_DIR"),
+      DISPLAY: Quickshell.env("DISPLAY"),
+      WAYLAND_DISPLAY: Quickshell.env("WAYLAND_DISPLAY")
+    }
+    for (var key in extra) base[key] = extra[key]
+    return base
+  }
+
   function store(key, onDone) {
     storeProc.command = ["bash", "-c",
       "printf '%s' \"$OMARCHY_UNRAID_SECRET\" | secret-tool store --label=\"" + root.label + "\" service " + root.serviceId + " account default"]
-    storeProc.environment = { "OMARCHY_UNRAID_SECRET": key }
+    storeProc.environment = root.sessionEnv({ "OMARCHY_UNRAID_SECRET": key })
     storeProc._onDone = onDone || null
     storeProc.running = true
   }
@@ -64,7 +85,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var value = text()
+        var value = text
         if (fetchProc._callback) fetchProc._callback(value)
         fetchProc._callback = null
       }
