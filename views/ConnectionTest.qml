@@ -61,8 +61,16 @@ Column {
       "OMARCHY_UNRAID_QUERY": query,
       "OMARCHY_UNRAID_URL": url
     })
+    // A real mktemp'd file for -K, not `-K <(...)` process substitution —
+    // the latter intermittently made curl misparse the config ("config
+    // file option '"' is unknown" on an unrelated later line) against a
+    // real server, not reproducible on every run, so it reads like a
+    // stream-vs-seekable-file edge case in curl's config parser rather
+    // than anything wrong with the config content itself. A real file
+    // sidesteps the whole class of issue; `trap ... EXIT` still keeps the
+    // key off disk for longer than one process's lifetime.
     testProc.command = ["bash", "-c",
-      'curl -fsS --max-time 6 -K <(printf \'%s\' "$OMARCHY_UNRAID_CURL_CONFIG") -X POST --data "$OMARCHY_UNRAID_QUERY" "$OMARCHY_UNRAID_URL"']
+      'CFGFILE=$(mktemp) && trap \'rm -f "$CFGFILE"\' EXIT && printf \'%s\' "$OMARCHY_UNRAID_CURL_CONFIG" > "$CFGFILE" && curl -fsS --max-time 6 -K "$CFGFILE" -X POST --data "$OMARCHY_UNRAID_QUERY" "$OMARCHY_UNRAID_URL"']
     testProc.running = true
   }
 
