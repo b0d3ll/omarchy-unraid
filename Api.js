@@ -65,6 +65,23 @@ function mutationDockerRestart(id) {
   return "mutation { docker { restart(id: " + JSON.stringify(id) + ") { id state status } } }"
 }
 
+// ----------------------------------------------------------- vm operations
+//
+// These sit under `vm` (singular) even though the query root is `vms`, and
+// they return a scalar rather than an object — both verified against a
+// real server. start/stop/reboot/pause/resume/forceStop all exist.
+
+function mutationVm(kind, id) {
+  return "mutation { vm { " + kind + "(id: " + JSON.stringify(id) + ") } }"
+}
+
+function mutationVmStart(id) { return mutationVm("start", id) }
+function mutationVmStop(id) { return mutationVm("stop", id) }
+function mutationVmReboot(id) { return mutationVm("reboot", id) }
+function mutationVmPause(id) { return mutationVm("pause", id) }
+function mutationVmResume(id) { return mutationVm("resume", id) }
+function mutationVmForceStop(id) { return mutationVm("forceStop", id) }
+
 // Logs are readable with a plain read-only key, unlike the mutations above.
 function queryDockerLogs(id, tail) {
   var lines = num(tail, 100)

@@ -52,33 +52,63 @@ Item {
     return null
   }
 
-  // ------------------------------------------------------- docker actions
+  function domainById(id) {
+    var list = vms.domains || []
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]
+    return null
+  }
+
+  // -------------------------------------------------------------- actions
   //
   // One place that runs a mutation and then re-reads the truth (spec
-  // section 45): lock, mutate, refresh, report. The reply's own state
-  // field is ignored on purpose — a container mid-restart reports
-  // whatever it happens to be at that instant, so the next Docker poll is
-  // the authority.
+  // section 45): lock, mutate, refresh, report. A mutation's own reply is
+  // ignored beyond its error status — something mid-restart reports
+  // whatever state it happens to be in at that instant, so the next poll
+  // of the resource is the authority.
+  //
+  // Docker and VM actions share the slot and the request because they
+  // share the one GraphQlRequest anyway, which serialises them regardless.
+  // Views read the scope-specific aliases below, so each only ever sees
+  // its own pending action.
+  property var actionPending: null // { scope, kind, id, name }
 
-  // { id, kind } while an action is in flight, so exactly the pressed
-  // button shows its pending label and its siblings lock.
-  property var dockerActionPending: null
-  // Latched once the server refuses a control: the key is read-only, and
-  // that won't change until the user grants it Docker update permission,
-  // so there's no point leaving the buttons armed (spec section 39).
+  readonly property var dockerActionPending:
+    (actionPending && actionPending.scope === "docker") ? actionPending : null
+  readonly property var vmActionPending:
+    (actionPending && actionPending.scope === "vm") ? actionPending : null
+
+  // Latched once the server refuses a control: a read-only key won't start
+  // working mid-session, so there's no point leaving the buttons armed
+  // (spec section 39). Tracked per scope, since a key can perfectly well
+  // be allowed to control one and not the other.
   property bool dockerControlsForbidden: false
+  property bool vmControlsForbidden: false
 
   signal dockerActionFinished(string name, string kind, bool ok, string message)
+  signal vmActionFinished(string name, string kind, bool ok, string message)
 
   function dockerAction(kind, container) {
-    if (!container || dockerActionPending || dockerControlsForbidden) return
+    if (!container || actionPending || dockerControlsForbidden) return
     var query = kind === "start" ? Api.mutationDockerStart(container.id)
       : kind === "stop" ? Api.mutationDockerStop(container.id)
       : kind === "restart" ? Api.mutationDockerRestart(container.id)
       : ""
     if (query === "") return
+    actionPending = { scope: "docker", id: container.id, kind: kind, name: container.name }
+    actionRequest.send(query)
+  }
 
-    dockerActionPending = { id: container.id, kind: kind, name: container.name }
+  function vmAction(kind, domain) {
+    if (!domain || actionPending || vmControlsForbidden) return
+    var query = kind === "start" ? Api.mutationVmStart(domain.id)
+      : kind === "stop" ? Api.mutationVmStop(domain.id)
+      : kind === "reboot" ? Api.mutationVmReboot(domain.id)
+      : kind === "pause" ? Api.mutationVmPause(domain.id)
+      : kind === "resume" ? Api.mutationVmResume(domain.id)
+      : kind === "forceStop" ? Api.mutationVmForceStop(domain.id)
+      : ""
+    if (query === "") return
+    actionPending = { scope: "vm", id: domain.id, kind: kind, name: domain.name }
     actionRequest.send(query)
   }
 
@@ -162,8 +192,8 @@ Item {
     secretStore: root.secretStore
 
     onSucceeded: function(data, errors) {
-      var pending = root.dockerActionPending || ({})
-      root.dockerActionPending = null
+      var pending = root.actionPending || ({})
+      root.actionPending = null
       // Mutations answer HTTP 200 with an errors array on refusal, so a
       // reply arriving is not the same as the action having happened.
       var first = errors && errors.length > 0 ? errors[0] : null
@@ -172,27 +202,43 @@ Item {
           first.extensions ? first.extensions.code : "")
         return
       }
-      dockerQuery.refresh()
-      root.dockerActionFinished(pending.name || "Container", pending.kind || "", true, "")
+      if (pending.scope === "vm") {
+        vmsQuery.refresh()
+        root.vmActionFinished(pending.name || "VM", pending.kind || "", true, "")
+      } else {
+        dockerQuery.refresh()
+        root.dockerActionFinished(pending.name || "Container", pending.kind || "", true, "")
+      }
     }
 
     onFailed: function(reason, message) {
-      var pending = root.dockerActionPending || ({})
-      root.dockerActionPending = null
+      var pending = root.actionPending || ({})
+      root.actionPending = null
       root._reportActionFailure(pending, message, reason === "rejected" ? "REJECTED" : "")
     }
   }
 
   function _reportActionFailure(pending, message, code) {
+    var isVm = pending.scope === "vm"
+    var subject = pending.name || (isVm ? "VM" : "Container")
     var forbidden = /forbidden|not allowed|permission/i.test(message || "")
       || code === "FORBIDDEN"
+
     if (forbidden) {
-      root.dockerControlsForbidden = true
-      root.dockerActionFinished(pending.name || "Container", pending.kind || "", false,
-        "The API key isn't allowed to control Docker.")
+      if (isVm) {
+        root.vmControlsForbidden = true
+        root.vmActionFinished(subject, pending.kind || "", false,
+          "The API key isn't allowed to control VMs.")
+      } else {
+        root.dockerControlsForbidden = true
+        root.dockerActionFinished(subject, pending.kind || "", false,
+          "The API key isn't allowed to control Docker.")
+      }
       return
     }
-    root.dockerActionFinished(pending.name || "Container", pending.kind || "", false, message)
+
+    if (isVm) root.vmActionFinished(subject, pending.kind || "", false, message)
+    else root.dockerActionFinished(subject, pending.kind || "", false, message)
   }
 
   ResourceQuery {

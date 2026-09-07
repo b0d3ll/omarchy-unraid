@@ -33,18 +33,20 @@ Panel {
   }
 
   // "loading" | "setup" | "overview" | "docker" | "dockerDetail" |
-  // "dockerLogs" | "vms" | "storage" | "alerts" | "settings". Not a
+  // "dockerLogs" | "vms" | "vmDetail" | "storage" | "alerts" | "settings". Not a
   // tab-index because Settings is reached via the gear, not the tab row
   // (spec section 9), and setup/loading replace the whole panel body
   // (header + tabs included) rather than being a tab.
   property string activeView: "loading"
 
-  // Which container the Docker subviews are showing.
+  // Which container / VM the subviews are showing.
   property string selectedContainerId: ""
+  property string selectedDomainId: ""
 
-  // The Docker tab stays lit while you're inside one of its subviews.
+  // A tab stays lit while you're inside one of its subviews.
   function tabIsActive(key) {
     if (key === "docker") return activeView.indexOf("docker") === 0
+    if (key === "vms") return activeView === "vms" || activeView === "vmDetail"
     return activeView === key
   }
 
@@ -133,7 +135,8 @@ Panel {
       case "overview": service.refreshMetrics(); service.refreshArray(); break
       case "docker":
       case "dockerDetail": service.refreshDocker(); break
-      case "vms": service.refreshVms(); break
+      case "vms":
+      case "vmDetail": service.refreshVms(); break
       case "storage": service.refreshArray(); break
       case "alerts": service.refreshNotifications(); break
     }
@@ -314,6 +317,7 @@ Panel {
                 case "dockerDetail": return dockerDetailViewComponent
                 case "dockerLogs": return dockerLogsViewComponent
                 case "vms": return vmsViewComponent
+                case "vmDetail": return vmDetailViewComponent
                 case "storage": return storageViewComponent
                 case "alerts": return alertsViewComponent
                 case "settings": return settingsViewComponent
@@ -357,9 +361,24 @@ Panel {
   // Spec section 45: report the outcome once the server has confirmed it.
   Connections {
     target: root.service
+
     function onDockerActionFinished(name, kind, ok, message) {
       if (ok) {
         var verb = kind === "start" ? "started" : kind === "stop" ? "stopped" : "restarted"
+        toast.show(name + " " + verb)
+      } else {
+        toast.show(message !== "" ? message : name + " could not be " + kind + "ed")
+      }
+    }
+
+    function onVmActionFinished(name, kind, ok, message) {
+      if (ok) {
+        var verb = kind === "start" ? "started"
+          : kind === "stop" ? "stopped"
+          : kind === "reboot" ? "rebooted"
+          : kind === "pause" ? "paused"
+          : kind === "resume" ? "resumed"
+          : "force stopped"
         toast.show(name + " " + verb)
       } else {
         toast.show(message !== "" ? message : name + " could not be " + kind + "ed")
@@ -446,6 +465,25 @@ Panel {
       service: root.service
       foreground: root.barForeground
       onToastRequested: function(message) { toast.show(message) }
+      onDomainSelected: function(domainId) {
+        root.selectedDomainId = domainId
+        root.activeView = "vmDetail"
+      }
+    }
+  }
+
+  Component {
+    id: vmDetailViewComponent
+    VmDetailView {
+      service: root.service
+      domainId: root.selectedDomainId
+      foreground: root.barForeground
+      onBackRequested: root.activeView = "vms"
+      onConfirmRequested: function(message, confirmText, kind) {
+        root.askConfirm(message, confirmText, function() {
+          root.service.vmAction(kind, root.service.domainById(root.selectedDomainId))
+        })
+      }
     }
   }
 

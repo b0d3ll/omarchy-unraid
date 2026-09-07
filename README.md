@@ -3,21 +3,22 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: Milestone 5 — Docker controls.** Onboarding saves a real server URL and
+**Status: Milestone 6 — Docker and VM controls.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
 and notifications. Verified against Unraid 7.3.2 / API 4.37.3.
 
-Clicking a container opens a detail view with Start / Stop / Restart,
-Open WebUI and a log viewer. Controlling containers needs an API key with
-Docker update permission (Unraid → Settings → Management Access → API
-Keys); a read-only key still gets everything else, and the controls say so
-instead of failing silently.
+Clicking a container or VM opens a detail view with controls — containers
+get Start / Stop / Restart, Open WebUI and a log viewer; VMs get Start /
+Stop / Reboot plus Pause, Resume and Force stop. Controlling anything
+needs an API key with the matching update permission (Unraid → Settings →
+Management Access → API Keys); a read-only key still gets everything else,
+and the controls say exactly what's missing instead of failing silently.
 
-Still to come: VM controls (Milestone 6), the LAN/Tailscale connection
-manager with failover and offline caching (Milestone 3, deliberately
-deferred), and desktop notifications (Milestone 7).
+Still to come: the LAN/Tailscale connection manager with failover and
+offline caching (Milestone 3, deliberately deferred), and desktop
+notifications (Milestone 7).
 
 ## Requirements
 
@@ -36,8 +37,11 @@ deferred), and desktop notifications (Milestone 7).
   notifications, and working WebUI / Terminal / Refresh actions.
 - Docker: live container list with state, update badges and search, plus a
   per-container detail view with controls and logs.
-- VMs, Storage (incl. disabled/missing/invalid disk counts) and Alerts
-  (click a notification to open it in the Unraid WebUI).
+- VMs: live list plus a per-VM detail view with start/stop/reboot and,
+  under "More", pause and force stop — the latter behind a confirmation
+  that spells out that it's the equivalent of cutting power.
+- Storage (incl. disabled/missing/invalid disk counts) and Alerts (click a
+  notification to open it in the Unraid WebUI).
 - Settings: live Unraid/API version and uptime, plus editing the server
   address and replacing the API key.
 - "Load disk details" shows the disk-sleep warning dialog (loads nothing
@@ -88,6 +92,7 @@ omarchy restart shell
 
 ## Roadmap
 
-See the project plan for the full milestone breakdown. Next up (Milestone 6):
-VM controls — start, stop, reboot, pause/resume and force stop, with the
-stronger confirmation force stop deserves.
+See the project plan for the full milestone breakdown. Next up: the
+connection manager (Milestone 3) — LAN/Tailscale endpoints with automatic
+failover, offline mode and cached last-known state — then notifications
+and polish (Milestone 7).

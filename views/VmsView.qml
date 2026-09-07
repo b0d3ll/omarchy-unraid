@@ -4,7 +4,8 @@ import qs.Commons
 import "../components"
 
 // Virtual machine list (spec section 21). Same row pattern as Docker, no
-// search/update badge. Start/stop/reboot land in Milestone 6.
+// search/update badge. Clicking a row opens its detail view, where the
+// controls live (spec sections 22-24).
 Column {
   id: root
 
@@ -12,6 +13,7 @@ Column {
   property color foreground: Color.foreground
 
   signal toastRequested(string message)
+  signal domainSelected(string domainId)
 
   readonly property var _vms: service ? service.vms : ({ available: false, domains: [] })
   readonly property int _runningCount: (root._vms.domains || []).filter(function(v) { return v.state === "RUNNING" }).length
@@ -128,7 +130,7 @@ Column {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: root.toastRequested("VM detail view is coming in Milestone 6.")
+          onClicked: root.domainSelected(row.modelData.id)
         }
       }
     }
