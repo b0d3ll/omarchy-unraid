@@ -5,9 +5,9 @@ import qs.Ui
 import "../components"
 import "../Model.js" as Model
 
-// Notification list with an All/Warnings/Critical filter (spec section 27),
-// live as of Milestone 4. Archiving lands with Milestone 7; a row click
-// opens the notification's target in the Unraid WebUI when it has one.
+// Notification list with an All/Warnings/Critical filter (spec section 27).
+// A row click opens the notification's target in the Unraid WebUI when it
+// has one; Archive clears it from the server's unread list.
 Column {
   id: root
 
@@ -84,6 +84,17 @@ Column {
 
         Behavior on color { ColorAnimation { duration: 100 } }
 
+        // Declared before the content on purpose: later siblings receive
+        // input first, so a row-wide MouseArea placed after the column
+        // would swallow clicks aimed at the Archive button inside it.
+        MouseArea {
+          id: entryMouse
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.openNotification(entry.modelData)
+        }
+
         Column {
           id: entryColumn
           anchors.left: parent.left
@@ -126,24 +137,34 @@ Column {
             leftPadding: Style.space(18)
           }
 
-          Text {
-            textFormat: Text.PlainText
-            text: Model.relativeTime(entry.modelData.timestamp)
-              + (entry.modelData.description !== "" ? " · " + entry.modelData.description : "")
-            color: Qt.darker(root.foreground, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.caption
+          Row {
+            spacing: Style.space(8)
             leftPadding: Style.space(18)
+
+            Text {
+              textFormat: Text.PlainText
+              anchors.verticalCenter: parent.verticalCenter
+              text: Model.relativeTime(entry.modelData.timestamp)
+                + (entry.modelData.description !== "" ? " · " + entry.modelData.description : "")
+              color: Qt.darker(root.foreground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Button {
+              anchors.verticalCenter: parent.verticalCenter
+              text: {
+                var p = root.service ? root.service.notificationActionPending : null
+                return (p && p.id === entry.modelData.id) ? "Archiving…" : "Archive"
+              }
+              foreground: root.foreground
+              enabled: root.service && !root.service.notificationActionPending
+                && !root.service.offline
+              onClicked: root.service.archiveNotification(entry.modelData)
+            }
           }
         }
 
-        MouseArea {
-          id: entryMouse
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onClicked: root.openNotification(entry.modelData)
-        }
       }
     }
   }

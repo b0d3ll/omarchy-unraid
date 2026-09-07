@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.1 feature-complete.** Onboarding saves a real server URL and
+**Status: v0.1 complete.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -22,7 +22,9 @@ own — LAN at home, Tailscale away — without any interaction. Endpoints can
 be auto-detected (from what the server advertises and from the local
 Tailscale client) and tested individually.
 
-Still to come: desktop notifications and polish (Milestone 7).
+Newly arrived warnings and alerts can raise a desktop notification (off by
+default, under Settings > Behavior); clicking one opens the panel on the
+Alerts tab. Notifications can also be archived from there.
 
 ## Requirements
 
@@ -44,8 +46,8 @@ Still to come: desktop notifications and polish (Milestone 7).
 - VMs: live list plus a per-VM detail view with start/stop/reboot and,
   under "More", pause and force stop — the latter behind a confirmation
   that spells out that it's the equivalent of cutting power.
-- Storage (incl. disabled/missing/invalid disk counts) and Alerts (click a
-  notification to open it in the Unraid WebUI).
+- Storage (incl. disabled/missing/invalid disk counts) and Alerts — click a
+  notification to open it in the Unraid WebUI, or archive it.
 - Settings: live Unraid/API version and uptime, plus editing the server
   address and replacing the API key.
 - "Load disk details" shows the disk-sleep warning dialog (loads nothing
@@ -116,8 +118,7 @@ omarchy restart shell
 
 ## Roadmap
 
-Every milestone in the v0.1 spec is now implemented. What's left is
-Milestone 7: desktop notifications for new warnings and alerts, and the
-remaining empty/error-state polish. Deliberately out of scope for v0.1:
+Every milestone in the v0.1 spec is now implemented. Deliberately out of
+scope for v0.1:
 multiple servers, container updates/installs, share management, SMART and
 temperature monitoring, and Unraid Connect as a transport.

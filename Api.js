@@ -65,6 +65,12 @@ function mutationDockerRestart(id) {
   return "mutation { docker { restart(id: " + JSON.stringify(id) + ") { id state status } } }"
 }
 
+// Archiving is a top-level mutation, not under a `notifications` root
+// (verified against a real server), and it returns the notification.
+function mutationArchiveNotification(id) {
+  return "mutation { archiveNotification(id: " + JSON.stringify(id) + ") { id } }"
+}
+
 // ------------------------------------------------------ endpoint discovery
 //
 // What the server itself advertises (spec section 29 step 3). On a real

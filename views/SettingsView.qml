@@ -529,12 +529,52 @@ Column {
     width: parent.width
     spacing: Style.space(4)
     PanelSectionHeader { text: "BEHAVIOR"; foreground: root.foreground }
+
+    Row {
+      spacing: Style.space(8)
+
+      Text {
+        textFormat: Text.PlainText
+        anchors.verticalCenter: parent.verticalCenter
+        text: "Desktop notifications"
+        color: root.foreground
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Button {
+        anchors.verticalCenter: parent.verticalCenter
+        text: (root.configStore && root.configStore.desktopNotifications) ? "On" : "Off"
+        bordered: true
+        selected: root.configStore && root.configStore.desktopNotifications
+        foreground: root.foreground
+        onClicked: root.configStore.save({
+          desktopNotifications: !root.configStore.desktopNotifications
+        })
+      }
+    }
+
     Text {
       textFormat: Text.PlainText
-      text: "Coming in Milestone 3"
+      width: parent.width
+      wrapMode: Text.WordWrap
+      text: "Announces newly arrived warnings and alerts once each. Existing "
+        + "ones are never re-announced, including after a shell restart."
       color: Qt.darker(root.foreground, 1.4)
       font.family: Style.font.family
-      font.pixelSize: Style.font.bodySmall
+      font.pixelSize: Style.font.caption
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      width: parent.width
+      wrapMode: Text.WordWrap
+      text: "Refresh intervals and cached state are not configurable — the "
+        + "panel already slows its polling while closed and keeps the last "
+        + "known values when the server is unreachable."
+      color: Qt.darker(root.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
     }
   }
 

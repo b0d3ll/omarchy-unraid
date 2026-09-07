@@ -35,6 +35,11 @@ Item {
   // [{ id, type, name, baseUrl, graphqlUrl, priority, enabled }]
   property var endpoints: []
 
+  // Spec section 28's one Behavior setting that has something to gate:
+  // desktop notifications. Off by default — a plugin that starts pushing
+  // notifications uninvited is a plugin people turn off.
+  property bool desktopNotifications: false
+
   function applyJson(text) {
     var data = {}
     try { data = JSON.parse(text || "{}") } catch (e) { data = {} }
@@ -45,6 +50,7 @@ Item {
     root.apiVersion = typeof data.apiVersion === "string" ? data.apiVersion : ""
     root.lastTestedAt = typeof data.lastTestedAt === "string" ? data.lastTestedAt : ""
     root.endpoints = root._migrateEndpoints(data)
+    root.desktopNotifications = data.desktopNotifications === true
     root.loaded = true
   }
 
@@ -100,7 +106,9 @@ Item {
       unraidVersion: fields.unraidVersion !== undefined ? fields.unraidVersion : root.unraidVersion,
       apiVersion: fields.apiVersion !== undefined ? fields.apiVersion : root.apiVersion,
       lastTestedAt: fields.lastTestedAt !== undefined ? fields.lastTestedAt : root.lastTestedAt,
-      endpoints: fields.endpoints !== undefined ? fields.endpoints : root.endpoints
+      endpoints: fields.endpoints !== undefined ? fields.endpoints : root.endpoints,
+      desktopNotifications: fields.desktopNotifications !== undefined
+        ? fields.desktopNotifications : root.desktopNotifications
     }
     applyJson(JSON.stringify(data))
     // mkdir must finish before the write lands, or a truly fresh install

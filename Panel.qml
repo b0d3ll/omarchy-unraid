@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "components"
@@ -17,10 +18,26 @@ Panel {
   id: root
   moduleName: "io.github.b0d3ll.omarchy-unraid"
   ipcTarget: "io.github.b0d3ll.omarchy-unraid"
-  // manageIpc left at its true default — the base Panel's own IpcHandler
-  // (open/close/show/hide/toggle) covers everything this plugin needs.
-  // Overriding it to own a custom IpcHandler (as weather/power do) is only
-  // required once a milestone adds extra IPC methods of its own.
+  // Now owning the single IpcHandler the target permits, which is what
+  // Milestone 1's note said would be needed once a milestone added an IPC
+  // method of its own: a desktop notification's click action opens the
+  // panel *on the Alerts tab*, which the base handler can't express.
+  manageIpc: false
+
+  IpcHandler {
+    target: root.ipcTarget
+
+    function open(): void { root.open() }
+    function close(): void { root.close() }
+    function show(): void { root.open() }
+    function hide(): void { root.close() }
+    function toggle(): void { root.toggle() }
+
+    function openAlerts(): void {
+      root.activeView = "alerts"
+      root.open()
+    }
+  }
 
   property ConfigStore configStore: ConfigStore {}
   property SecretStore secretStore: SecretStore {}
@@ -410,6 +427,11 @@ Panel {
       } else {
         toast.show(message !== "" ? message : name + " could not be " + kind + "ed")
       }
+    }
+
+    function onNotificationArchived(title, ok, message) {
+      toast.show(ok ? "Archived: " + title
+        : (message !== "" ? message : "Could not archive " + title))
     }
 
     function onVmActionFinished(name, kind, ok, message) {

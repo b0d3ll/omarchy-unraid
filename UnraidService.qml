@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell.Io
+import qs.Commons
 import "Api.js" as Api
 import "Model.js" as Model
 
@@ -125,6 +126,64 @@ Item {
     if (query === "") return
     actionPending = { scope: "vm", id: domain.id, kind: kind, name: domain.name }
     actionRequest.send(query)
+  }
+
+  // ------------------------------------------------------- notifications
+
+  property var notificationActionPending: null
+
+  signal notificationArchived(string title, bool ok, string message)
+
+  function archiveNotification(item) {
+    if (!item || notificationActionPending) return
+    notificationActionPending = { id: item.id, title: item.title }
+    archiveRequest.send(Api.mutationArchiveNotification(item.id))
+  }
+
+  // Spec section 43: notify only for *newly observed* warnings and alerts,
+  // and never twice for the same notification id.
+  //
+  // The first poll seeds the seen-set instead of announcing everything —
+  // otherwise every shell restart would re-announce a backlog the user
+  // already knows about.
+  property bool desktopNotificationsEnabled: configStore
+    ? configStore.desktopNotifications : false
+  property var _seenNotificationIds: ({})
+  property bool _notificationsSeeded: false
+
+  function _handleNotifications() {
+    var items = root.notifications || []
+    if (!root._notificationsSeeded) {
+      var seed = {}
+      for (var i = 0; i < items.length; i++) seed[items[i].id] = true
+      root._seenNotificationIds = seed
+      root._notificationsSeeded = true
+      return
+    }
+
+    var seen = {}
+    for (var k in root._seenNotificationIds) seen[k] = root._seenNotificationIds[k]
+    for (var j = 0; j < items.length; j++) {
+      var item = items[j]
+      if (seen[item.id]) continue
+      seen[item.id] = true
+      if (root.desktopNotificationsEnabled) root._sendDesktopNotification(item)
+    }
+    root._seenNotificationIds = seen
+  }
+
+  function _sendDesktopNotification(item) {
+    var critical = item.importance === "ALERT"
+    // execArgv, not a shell string: the title and description come from
+    // the server. --exec makes clicking the notification open the panel
+    // on the Alerts tab.
+    Util.execArgv(["omarchy-notification-send",
+      "--app-name", "Unraid",
+      "-g", critical ? "󰀦" : "󰀨",
+      "-u", critical ? "critical" : "normal",
+      (root.system.hostname !== "" ? root.system.hostname : "Unraid") + " — " + item.title,
+      item.subject !== "" ? item.subject : item.description,
+      "--exec", "omarchy-shell", "io.github.b0d3ll.omarchy-unraid", "openAlerts"])
   }
 
   readonly property var logs: Api.normalizeLogs(logsQuery.result)
@@ -372,6 +431,30 @@ Item {
   }
 
   GraphQlRequest {
+    id: archiveRequest
+    endpoint: root.endpoint
+    secretStore: root.secretStore
+
+    onSucceeded: function(data, errors) {
+      var pending = root.notificationActionPending || ({})
+      root.notificationActionPending = null
+      var first = errors && errors.length > 0 ? errors[0] : null
+      if (first) {
+        root.notificationArchived(pending.title || "Notification", false, first.message)
+        return
+      }
+      notificationsQuery.refresh()
+      root.notificationArchived(pending.title || "Notification", true, "")
+    }
+
+    onFailed: function(reason, message) {
+      var pending = root.notificationActionPending || ({})
+      root.notificationActionPending = null
+      root.notificationArchived(pending.title || "Notification", false, message)
+    }
+  }
+
+  GraphQlRequest {
     id: actionRequest
     endpoint: root.endpoint
     secretStore: root.secretStore
@@ -509,6 +592,7 @@ Item {
 
   ResourceQuery {
     id: notificationsQuery
+    onLoaded: root._handleNotifications()
     queryString: Api.QUERY_NOTIFICATIONS
     endpoint: root.endpoint
     secretStore: root.secretStore
