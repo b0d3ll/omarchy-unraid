@@ -28,6 +28,9 @@ Column {
   readonly property var _pending: service ? service.dockerActionPending : null
   readonly property bool _busy: root._pending !== null && root._pending !== undefined
   readonly property bool _forbidden: service ? service.dockerControlsForbidden : false
+  // Spec section 34: while offline the panel shows cached state, and
+  // acting on it would be acting on a guess.
+  readonly property bool _offline: service ? service.offline : false
   readonly property bool _running: root.container && root.container.state === "RUNNING"
 
   function pendingLabel(kind, idle) {
@@ -167,9 +170,20 @@ Column {
         }
       }
 
+      Text {
+        textFormat: Text.PlainText
+        visible: root._offline && !root._forbidden
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: "Controls are unavailable while the server is unreachable."
+        color: Qt.darker(root.foreground, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+
       Row {
         spacing: Style.space(8)
-        visible: !root._forbidden
+        visible: !root._forbidden && !root._offline
 
         // Starting something that is stopped is not disruptive, so it
         // runs without a confirmation (spec section 19).

@@ -6,7 +6,6 @@ import qs.Ui
 import "components"
 import "views"
 import "onboarding"
-import "Model.js" as Model
 
 // Bar-widget entry point (manifest.entryPoints.barWidget = "Panel.qml"),
 // same single-file pattern as the built-in power/clock plugins: this one
@@ -25,9 +24,15 @@ Panel {
 
   property ConfigStore configStore: ConfigStore {}
   property SecretStore secretStore: SecretStore {}
+  property ConnectionManager connectionManager: ConnectionManager {
+    configStore: root.configStore
+    secretStore: root.secretStore
+    panelOpen: root.opened && !root.inFullPanelFlow
+  }
   property UnraidService service: UnraidService {
     configStore: root.configStore
     secretStore: root.secretStore
+    connectionManager: root.connectionManager
     // Polling slows down while the panel is closed (spec section 37).
     panelOpen: root.opened && !root.inFullPanelFlow
   }
@@ -79,13 +84,23 @@ Panel {
     { key: "alerts", label: "Alerts" }
   ]
 
-  // Spec section 5's priority ladder, on real data now. STALE and
-  // CONNECTING need the connection manager's probe history to distinguish
-  // "cached but old" from "never loaded", so they arrive with Milestone 3.
+  // Spec section 5's priority ladder, complete now that the connection
+  // manager can tell "never loaded" (CONNECTING) from "unreachable but we
+  // still have data to show" (STALE).
   readonly property string healthState: {
     if (!isConfigured) return "NOTICE"
     if (service.authFailed) return "AUTH_ERROR"
-    if (service.unreachable) return "OFFLINE"
+    // The connection manager is the single authority on reachability.
+    // Reading a separate "both core queries failed" signal here as well
+    // produced contradictions — DEGRADED-but-working reported as OFFLINE,
+    // because the queries' last error lingers until the next success.
+    //
+    // Offline with nothing cached is worse than offline with data: the
+    // former shows an empty panel, the latter shows the last known state
+    // and says how old it is (spec section 34).
+    if (service.offline) return service.everLoaded ? "STALE" : "OFFLINE"
+    if (!service.everLoaded) return "CONNECTING"
+    if (service.stale) return "STALE"
     var array = service.arrayInfo
     var parity = array.parityCheckStatus || ({})
     // A missing disk is unambiguous — the drive isn't there. Disabled and
@@ -99,7 +114,6 @@ Panel {
     if (service.notificationSummary.unread.warning > 0) return "WARNING"
     if ((array.disabled || 0) > 0 || (array.invalid || 0) > 0) return "NOTICE"
     if (parity.running || (array.state !== "" && array.state !== "STARTED")) return "NOTICE"
-    if (!service.everLoaded) return "CONNECTING"
     return "HEALTHY"
   }
 
@@ -110,6 +124,7 @@ Panel {
     switch (healthState) {
       case "AUTH_ERROR": return "API key rejected"
       case "OFFLINE": return "Unreachable"
+      case "STALE": return "Stale · last seen " + service.lastSuccessLabel
       case "CRITICAL":
         if ((array.missing || 0) > 0) return "Array disk missing"
         return "Alert needs attention"
@@ -252,8 +267,7 @@ Panel {
               id: hero
               width: parent.width
               title: root.service.system.hostname
-              detail: root.service.connection.type
-              meta: root.healthLabel + " · updated " + Model.relativeTime(root.service.connection.lastSuccess)
+              meta: root.healthLabel + " · updated " + root.service.lastSuccessLabel
               foreground: root.barForeground
               iconComponent: Component {
                 Text {
@@ -264,11 +278,38 @@ Panel {
                   font.pixelSize: Style.font.display
                 }
               }
-              trailingControl: PanelActionButton {
-                iconText: "⚙"
-                tooltipText: "Settings"
-                foreground: root.barForeground
-                onClicked: root.activeView = "settings"
+              // The transport badge moved out of the hero's `detail` pill
+              // and into the trailing row so it can carry a tooltip —
+              // spec section 8 wants hovering it to reveal the endpoint
+              // and latency rather than showing the address permanently.
+              trailingControl: Row {
+                spacing: Style.space(8)
+
+                ConnectionBadge {
+                  anchors.verticalCenter: parent.verticalCenter
+                  connectionType: root.service.connection.type
+                  foreground: root.barForeground
+                  tooltipText: {
+                    var c = root.service.connection
+                    var lines = []
+                    if (c.state === "OFFLINE") {
+                      lines.push("Offline — last seen " + root.service.lastSuccessLabel)
+                    } else {
+                      lines.push("Connected via " + (c.name !== "" ? c.name : c.type))
+                    }
+                    if (c.endpoint !== "") lines.push(c.endpoint)
+                    if (c.latencyMs >= 0) lines.push("Latency: " + c.latencyMs + " ms")
+                    return lines.join("\n")
+                  }
+                }
+
+                PanelActionButton {
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: "⚙"
+                  tooltipText: "Settings"
+                  foreground: root.barForeground
+                  onClicked: root.activeView = "settings"
+                }
               }
             }
 

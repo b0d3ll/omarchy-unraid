@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import "Api.js" as Api
 import "Model.js" as Model
 
@@ -16,10 +17,24 @@ Item {
 
   property var configStore: null
   property var secretStore: null
+  property var connectionManager: null
   property bool panelOpen: false
 
-  readonly property string endpoint: configStore ? configStore.graphqlUrl : ""
+  // The one seam the connection manager slots into: which URL is current.
+  //
+  // When a manager is attached it is the *only* authority, even while it
+  // hasn't picked an endpoint yet (queries simply wait). An earlier
+  // version fell back to configStore.graphqlUrl whenever the manager's
+  // pick was empty, which meant traffic could quietly go somewhere other
+  // than the chosen endpoint — during testing that masked a deliberately
+  // broken endpoint and reported it as healthy.
+  readonly property string endpoint: connectionManager
+    ? connectionManager.activeGraphqlUrl
+    : (configStore ? configStore.graphqlUrl : "")
   readonly property bool active: endpoint !== "" && secretStore !== null && secretStore.present
+
+  // Spec section 34: offline shows cached values and disables controls.
+  readonly property bool offline: connectionManager ? connectionManager.offline : root.unreachable
 
   // --------------------------------------------------------- view-facing
 
@@ -146,30 +161,163 @@ Item {
 
   readonly property bool everLoaded: lastSuccess > 0
 
+  // Data old enough that showing it without saying so would be
+  // misleading — spec section 5's STALE. Deliberately judged on the age of
+  // the data rather than on whether a query just failed: the connection
+  // manager may still be working through endpoints, and one failed poll
+  // doesn't make the numbers on screen wrong yet.
+  //
+  // Computed on a timer rather than as a binding: a binding on Date.now()
+  // has nothing to invalidate it, so it would answer once and then never
+  // change its mind.
+  property bool stale: false
+  // Recomputed alongside it, because "updated just now" in the header was
+  // otherwise frozen at whatever it said when the poll landed.
+  property string lastSuccessLabel: "never"
+
+  function _refreshAges() {
+    stale = everLoaded && (Date.now() - lastSuccess > 180000)
+    lastSuccessLabel = Model.relativeTime(lastSuccess)
+  }
+
+  onLastSuccessChanged: _refreshAges()
+
+  Timer {
+    interval: 30000
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: root._refreshAges()
+  }
+
   readonly property var connection: ({
     state: !root.active ? "DISCONNECTED"
       : root.authFailed ? "AUTH_FAILED"
-      : root.unreachable ? "OFFLINE"
-      : root.everLoaded ? "CONNECTED_LAN" : "PROBING",
-    // Endpoint discovery and LAN/Tailscale switching arrive with the
-    // connection manager (Milestone 3); until then the configured server
-    // is by definition the local one.
-    type: root.unreachable ? "OFFLINE" : "LAN",
-    name: "LAN",
-    endpoint: configStore ? configStore.serverUrl : "",
-    latencyMs: null,
+      : root.offline ? "OFFLINE"
+      : connectionManager ? connectionManager.connectionState
+      : (root.everLoaded ? "CONNECTED" : "PROBING"),
+    // The badge shows which transport is carrying the connection, which
+    // is now a real answer rather than an assumption.
+    type: root.offline ? "OFFLINE"
+      : (connectionManager && connectionManager.activeType !== "")
+        ? connectionManager.activeType : "LAN",
+    name: (connectionManager && connectionManager.activeName !== "")
+      ? connectionManager.activeName : "LAN",
+    endpoint: (connectionManager && connectionManager.activeEndpoint)
+      ? connectionManager.activeEndpoint.baseUrl
+      : (configStore ? configStore.serverUrl : ""),
+    latencyMs: connectionManager ? connectionManager.latencyMs : -1,
     lastSuccess: root.lastSuccess
   })
 
   readonly property string uptime: Api.uptimeSince(system.bootTime)
 
+  // Follows the *active* endpoint: on Tailscale, a notification should
+  // open over Tailscale rather than at a LAN address that isn't reachable.
   function notificationUrl(link) {
-    return Api.notificationUrl(configStore ? configStore.serverUrl : "", link)
+    return Api.notificationUrl(root.connection.endpoint, link)
+  }
+
+  // ------------------------------------------------------------- discovery
+  //
+  // Proposes endpoints; never adopts them (spec section 42). Two sources,
+  // because neither is sufficient alone: the server advertises its LAN
+  // names but — verified on a real 7.3.2 box — no remote URL at all, while
+  // the local Tailscale client knows the tailnet address the server itself
+  // never mentions.
+
+  property var discovered: []
+  property bool discovering: false
+  property string discoveryNote: ""
+
+  function discoverEndpoints() {
+    if (discovering) return
+    discovering = true
+    discovered = []
+    discoveryNote = ""
+    _discoveryPending = 2
+    accessUrlsRequest.send(Api.QUERY_ACCESS_URLS)
+    tailscaleProc.running = true
+  }
+
+  property int _discoveryPending: 0
+
+  function _addDiscovered(list) {
+    if (!list || list.length === 0) return
+    var existing = []
+    var configured = endpointList
+    for (var i = 0; i < configured.length; i++) existing.push(configured[i].graphqlUrl)
+    for (var j = 0; j < discovered.length; j++) existing.push(discovered[j].graphqlUrl)
+
+    var merged = discovered.slice()
+    for (var k = 0; k < list.length; k++) {
+      if (existing.indexOf(list[k].graphqlUrl) >= 0) continue
+      existing.push(list[k].graphqlUrl)
+      merged.push(list[k])
+    }
+    discovered = merged
+  }
+
+  function _finishDiscoveryStep() {
+    _discoveryPending = Math.max(0, _discoveryPending - 1)
+    if (_discoveryPending > 0) return
+    discovering = false
+    if (discovered.length === 0) {
+      discoveryNote = "No new endpoints found. The server advertises only the "
+        + "address you already use, and no matching Tailscale peer was seen."
+    }
+  }
+
+  readonly property var endpointList: configStore ? (configStore.endpoints || []) : []
+
+  function addEndpoint(endpoint) {
+    if (!configStore || !endpoint) return
+    var list = endpointList.slice()
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].graphqlUrl === endpoint.graphqlUrl) return
+    }
+    list.push(endpoint)
+    configStore.saveEndpoints(list)
+    discovered = discovered.filter(function(d) { return d.graphqlUrl !== endpoint.graphqlUrl })
+  }
+
+  function removeEndpoint(id) {
+    if (!configStore) return
+    configStore.saveEndpoints(endpointList.filter(function(e) { return e.id !== id }))
+  }
+
+  function setEndpointEnabled(id, enabled) {
+    if (!configStore) return
+    configStore.saveEndpoints(endpointList.map(function(e) {
+      return e.id === id ? Object.assign({}, e, { enabled: enabled }) : e
+    }))
+  }
+
+  // Priority is what the selector orders by, so moving an endpoint is just
+  // renumbering the list after a swap.
+  function moveEndpoint(id, delta) {
+    if (!configStore) return
+    var list = endpointList.slice().sort(function(a, b) { return a.priority - b.priority })
+    var index = -1
+    for (var i = 0; i < list.length; i++) if (list[i].id === id) index = i
+    var target = index + delta
+    if (index < 0 || target < 0 || target >= list.length) return
+    var moved = list[index]
+    list[index] = list[target]
+    list[target] = moved
+    configStore.saveEndpoints(list.map(function(e, n) {
+      return Object.assign({}, e, { priority: n })
+    }))
   }
 
   // ---------------------------------------------------------------- actions
 
   function refresh() {
+    // Spec section 33: Refresh forces an immediate connection retry, not
+    // just a re-poll. Without this, hitting Refresh while offline did
+    // nothing until the backoff timer came round again — up to five
+    // minutes later.
+    if (connectionManager) connectionManager.probeNow()
     systemQuery.refresh()
     metricsQuery.refresh()
     arrayQuery.refresh()
@@ -185,6 +333,43 @@ Item {
   function refreshNotifications() { notificationsQuery.refresh() }
 
   // ------------------------------------------------------------- resources
+
+  GraphQlRequest {
+    id: accessUrlsRequest
+    endpoint: root.endpoint
+    secretStore: root.secretStore
+
+    onSucceeded: function(data, errors) {
+      var existing = []
+      for (var i = 0; i < root.endpointList.length; i++) existing.push(root.endpointList[i].graphqlUrl)
+      root._addDiscovered(Api.accessUrlCandidates(Api.normalizeAccessUrls(data), existing))
+      root._finishDiscoveryStep()
+    }
+
+    onFailed: function(reason, message) {
+      root.discoveryNote = "Could not ask the server for its addresses: " + message
+      root._finishDiscoveryStep()
+    }
+  }
+
+  // Same commands Omarchy's own tailscale plugin uses
+  // (plugins/panels/tailscale/Service.qml). A stopped or absent client
+  // simply yields no candidates rather than being an error — Tailscale is
+  // optional (spec section 29).
+  Process {
+    id: tailscaleProc
+    command: ["tailscale", "status", "--json"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var existing = []
+        for (var i = 0; i < root.endpointList.length; i++) existing.push(root.endpointList[i].graphqlUrl)
+        root._addDiscovered(Api.tailscaleCandidates(text, root.system.hostname, existing))
+      }
+    }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) { root._finishDiscoveryStep() }
+  }
 
   GraphQlRequest {
     id: actionRequest
@@ -266,6 +451,15 @@ Item {
 
   ResourceQuery {
     id: metricsQuery
+    // metrics and array are the two resources a healthy server always
+    // answers, so they're the ones whose reachability is allowed to move
+    // the connection manager. A Docker or VM outage must never trigger a
+    // failover (spec section 11).
+    onOutcome: function(ok, reason, forEndpoint) {
+      if (!root.connectionManager) return
+      if (ok) root.connectionManager.reportSuccess(forEndpoint)
+      else root.connectionManager.reportFailure(reason, forEndpoint)
+    }
     queryString: Api.QUERY_METRICS
     endpoint: root.endpoint
     secretStore: root.secretStore
@@ -277,6 +471,11 @@ Item {
 
   ResourceQuery {
     id: arrayQuery
+    onOutcome: function(ok, reason, forEndpoint) {
+      if (!root.connectionManager) return
+      if (ok) root.connectionManager.reportSuccess(forEndpoint)
+      else root.connectionManager.reportFailure(reason, forEndpoint)
+    }
     queryString: Api.QUERY_ARRAY
     endpoint: root.endpoint
     secretStore: root.secretStore

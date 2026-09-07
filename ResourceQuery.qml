@@ -36,11 +36,21 @@ Item {
   readonly property bool failing: errorReason !== ""
 
   signal loaded(var data)
+  // Reachability outcomes, so the connection manager can count real
+  // traffic toward failover instead of waiting for its own next probe.
+  // Carries the endpoint the request actually went to: a reply can arrive
+  // long after a failover, and crediting it to whatever is active *now*
+  // was observed abandoning a perfectly healthy endpoint.
+  signal outcome(bool ok, string reason, string forEndpoint)
+
+  // The endpoint in force when the in-flight request was sent.
+  property string sentEndpoint: ""
 
   function refresh() {
     if (!root.active || queryString === "") return
     if (request.busy) return
     loading = true
+    sentEndpoint = root.endpoint
     request.send(queryString)
   }
 
@@ -60,12 +70,14 @@ Item {
       root.result = data
       root.lastSuccess = Date.now()
       root.loaded(data)
+      root.outcome(true, "", root.sentEndpoint)
     }
 
     onFailed: function(reason, message) {
       root.loading = false
       root.errorReason = reason
       root.errorMessage = message
+      root.outcome(false, reason, root.sentEndpoint)
       // Deliberately keeps the previous `data` so a single failed poll
       // doesn't blank a working view — spec section 48: never blank the
       // panel while refreshing.

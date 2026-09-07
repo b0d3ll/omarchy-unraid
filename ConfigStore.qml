@@ -19,12 +19,21 @@ Item {
   readonly property string configPath: configDir + "/config.json"
 
   property bool loaded: false
+  // serverUrl/graphqlUrl describe the *preferred* endpoint. They're kept
+  // because onboarding, the header and Settings all still talk in terms
+  // of "the server address", and because a config written by an earlier
+  // version has only these. Which endpoint is actually live right now is
+  // ConnectionManager's business and is never written to disk — failover
+  // would otherwise mean a file write on every network blip.
   property string serverUrl: ""
   property string graphqlUrl: ""
   property string hostname: ""
   property string unraidVersion: ""
   property string apiVersion: ""
   property string lastTestedAt: ""
+
+  // [{ id, type, name, baseUrl, graphqlUrl, priority, enabled }]
+  property var endpoints: []
 
   function applyJson(text) {
     var data = {}
@@ -35,7 +44,47 @@ Item {
     root.unraidVersion = typeof data.unraidVersion === "string" ? data.unraidVersion : ""
     root.apiVersion = typeof data.apiVersion === "string" ? data.apiVersion : ""
     root.lastTestedAt = typeof data.lastTestedAt === "string" ? data.lastTestedAt : ""
+    root.endpoints = root._migrateEndpoints(data)
     root.loaded = true
+  }
+
+  // A config written before Milestone 3 has a single serverUrl and no
+  // endpoint list; turn that into one LAN entry rather than losing the
+  // server the user already set up.
+  function _migrateEndpoints(data) {
+    var list = Array.isArray(data.endpoints) ? data.endpoints : []
+    var cleaned = []
+    for (var i = 0; i < list.length; i++) {
+      var e = list[i]
+      if (!e || typeof e.graphqlUrl !== "string" || e.graphqlUrl === "") continue
+      cleaned.push({
+        id: String(e.id || ("endpoint-" + i)),
+        type: String(e.type || "CUSTOM"),
+        name: String(e.name || e.type || "Endpoint"),
+        baseUrl: String(e.baseUrl || ""),
+        graphqlUrl: String(e.graphqlUrl),
+        priority: typeof e.priority === "number" ? e.priority : i,
+        enabled: e.enabled !== false
+      })
+    }
+    if (cleaned.length > 0) return cleaned
+
+    if (typeof data.graphqlUrl === "string" && data.graphqlUrl !== "") {
+      return [{
+        id: "lan",
+        type: "LAN",
+        name: "LAN",
+        baseUrl: typeof data.serverUrl === "string" ? data.serverUrl : "",
+        graphqlUrl: data.graphqlUrl,
+        priority: 0,
+        enabled: true
+      }]
+    }
+    return []
+  }
+
+  function saveEndpoints(list) {
+    save({ endpoints: list })
   }
 
   // Persist the given fields (server identity learned during setup/test).
@@ -50,7 +99,8 @@ Item {
       hostname: fields.hostname !== undefined ? fields.hostname : root.hostname,
       unraidVersion: fields.unraidVersion !== undefined ? fields.unraidVersion : root.unraidVersion,
       apiVersion: fields.apiVersion !== undefined ? fields.apiVersion : root.apiVersion,
-      lastTestedAt: fields.lastTestedAt !== undefined ? fields.lastTestedAt : root.lastTestedAt
+      lastTestedAt: fields.lastTestedAt !== undefined ? fields.lastTestedAt : root.lastTestedAt,
+      endpoints: fields.endpoints !== undefined ? fields.endpoints : root.endpoints
     }
     applyJson(JSON.stringify(data))
     // mkdir must finish before the write lands, or a truly fresh install
@@ -63,7 +113,8 @@ Item {
   }
 
   function clear() {
-    save({ serverUrl: "", graphqlUrl: "", hostname: "", unraidVersion: "", apiVersion: "", lastTestedAt: "" })
+    save({ serverUrl: "", graphqlUrl: "", hostname: "", unraidVersion: "",
+      apiVersion: "", lastTestedAt: "", endpoints: [] })
   }
 
   Process {

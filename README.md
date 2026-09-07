@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: Milestone 6 — Docker and VM controls.** Onboarding saves a real server URL and
+**Status: v0.1 feature-complete.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -16,9 +16,13 @@ needs an API key with the matching update permission (Unraid → Settings →
 Management Access → API Keys); a read-only key still gets everything else,
 and the controls say exactly what's missing instead of failing silently.
 
-Still to come: the LAN/Tailscale connection manager with failover and
-offline caching (Milestone 3, deliberately deferred), and desktop
-notifications (Milestone 7).
+Connections are managed automatically: several endpoints can be
+configured with a priority order, and the plugin moves between them on its
+own — LAN at home, Tailscale away — without any interaction. Endpoints can
+be auto-detected (from what the server advertises and from the local
+Tailscale client) and tested individually.
+
+Still to come: desktop notifications and polish (Milestone 7).
 
 ## Requirements
 
@@ -47,9 +51,29 @@ notifications (Milestone 7).
 - "Load disk details" shows the disk-sleep warning dialog (loads nothing
   yet — per-disk queries stay strictly user-initiated).
 
+- Settings > Connections: the endpoint list with priority order, live
+  endpoint and latency, per-endpoint reachability test, and endpoint
+  auto-detection.
+
 Polling slows down while the panel is closed and speeds up while it's
 open; each resource is queried independently, so one unavailable subsystem
 (say Docker) never blanks the rest or reports the server as offline.
+
+## Connection handling
+
+Endpoints are tried in priority order. A working one is kept until it
+fails twice in a row, and a better one is only adopted back after it
+succeeds twice — so a flapping link can't make the plugin oscillate. When
+nothing answers, the panel keeps showing the last known state with its
+age, disables the controls, and retries on an escalating 15s→5min backoff;
+opening the panel or hitting Refresh retries immediately.
+
+The selection rules live in `Selection.js` as pure functions with no QML
+in them, so they're unit-tested rather than eyeballed:
+
+```bash
+node tests/selection.test.js
+```
 
 ## Disk-sleep safety
 
@@ -92,7 +116,8 @@ omarchy restart shell
 
 ## Roadmap
 
-See the project plan for the full milestone breakdown. Next up: the
-connection manager (Milestone 3) — LAN/Tailscale endpoints with automatic
-failover, offline mode and cached last-known state — then notifications
-and polish (Milestone 7).
+Every milestone in the v0.1 spec is now implemented. What's left is
+Milestone 7: desktop notifications for new warnings and alerts, and the
+remaining empty/error-state polish. Deliberately out of scope for v0.1:
+multiple servers, container updates/installs, share management, SMART and
+temperature monitoring, and Unraid Connect as a transport.

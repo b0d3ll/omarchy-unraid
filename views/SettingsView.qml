@@ -2,6 +2,9 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../components"
+import ".." as Plugin
+import "../Api.js" as Api
 
 // Server/Connections/Authentication are real now (spec section 28).
 // Behavior and About stay placeholders — Behavior's refresh-interval/
@@ -34,10 +37,73 @@ Column {
     return { baseUrl: trimmed, graphqlUrl: graphqlUrl }
   }
 
+  // Endpoints sorted the way the selector will actually try them, so the
+  // list on screen is the priority order rather than insertion order.
+  readonly property var _endpoints: {
+    var list = (root.service ? root.service.endpointList : []).slice()
+    return list.sort(function(a, b) {
+      var pa = typeof a.priority === "number" ? a.priority : 999
+      var pb = typeof b.priority === "number" ? b.priority : 999
+      return pa - pb
+    })
+  }
+
+  readonly property var _discovered: root.service ? root.service.discovered : []
+
+  // Per-endpoint reachability results, keyed by endpoint id. The server
+  // advertising an address doesn't mean this machine can reach it —
+  // `tower.local` is advertised but needs an mDNS resolver the client may
+  // not have — so each one can be checked before you rely on it.
+  property var endpointProbes: ({})
+
+  function testEndpoint(endpoint) {
+    if (!endpoint) return
+    var next = {}
+    for (var k in root.endpointProbes) next[k] = root.endpointProbes[k]
+    next[endpoint.id] = "testing"
+    root.endpointProbes = next
+    endpointProbe.probeId = endpoint.id
+    endpointProbe.endpoint = endpoint.graphqlUrl
+    endpointProbe.send(Api.QUERY_HEALTH)
+  }
+
+  function _recordProbe(id, verdict) {
+    var next = {}
+    for (var k in root.endpointProbes) next[k] = root.endpointProbes[k]
+    next[id] = verdict
+    root.endpointProbes = next
+  }
+
+  Plugin.GraphQlRequest {
+    id: endpointProbe
+    secretStore: root.secretStore
+    timeoutSeconds: 4
+
+    property string probeId: ""
+
+    onSucceeded: function(data, errors) {
+      root._recordProbe(endpointProbe.probeId, (data && data.online) ? "ok" : "odd")
+    }
+    onFailed: function(reason, message) {
+      root._recordProbe(endpointProbe.probeId, reason === "unreachable" ? "unreachable" : "rejected")
+    }
+  }
+
+  // "Add" rather than "Save": there's a list now, so a typed address
+  // becomes another candidate instead of replacing the server.
   function saveServer() {
-    if (root.editServerInput.trim() === "") return
+    if (root.editServerInput.trim() === "" || !root.service) return
     var normalized = root.normalizeAddress(root.editServerInput)
-    root.configStore.save({ serverUrl: normalized.baseUrl, graphqlUrl: normalized.graphqlUrl })
+    root.service.addEndpoint({
+      id: "custom-" + Date.now(),
+      type: "CUSTOM",
+      name: "Custom",
+      baseUrl: normalized.baseUrl,
+      graphqlUrl: normalized.graphqlUrl,
+      priority: root._endpoints.length,
+      enabled: true
+    })
+    root.editServerInput = ""
     root.editingServer = false
   }
 
@@ -95,35 +161,232 @@ Column {
   }
 
   // --------------------------------------------------------- CONNECTIONS
+  //
+  // The endpoint list is the connection config now (spec sections 28, 30):
+  // priority order is what the selector walks, so reordering here is what
+  // decides "try LAN first, fall back to Tailscale".
   Column {
     width: parent.width
     spacing: Style.space(6)
 
     PanelSectionHeader { text: "CONNECTIONS"; foreground: root.foreground }
 
-    Row {
-      visible: !root.editingServer
-      spacing: Style.space(8)
+    EmptyState {
+      width: parent.width
+      visible: root._endpoints.length === 0
+      message: "No endpoints configured."
+      foreground: root.foreground
+    }
 
-      Text {
-        textFormat: Text.PlainText
-        text: root.configStore && root.configStore.serverUrl !== "" ? root.configStore.serverUrl : "Not set"
-        color: root.foreground
-        font.family: Style.font.family
-        font.pixelSize: Style.font.bodySmall
+    Repeater {
+      model: root._endpoints
+
+      Column {
+        id: endpointRow
+        required property var modelData
+        readonly property bool isActive: root.service
+          && root.service.connection.endpoint === endpointRow.modelData.baseUrl
+          && !root.service.offline
+
+        width: root.width
+        spacing: Style.space(2)
+
+        Row {
+          spacing: Style.space(6)
+          width: parent.width
+
+          Text {
+            textFormat: Text.PlainText
+            text: endpointRow.modelData.name || endpointRow.modelData.type
+            color: endpointRow.modelData.enabled ? root.foreground : Qt.darker(root.foreground, 1.8)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.bold: endpointRow.isActive
+          }
+
+          StatusBadge {
+            visible: endpointRow.isActive
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.service && root.service.connection.latencyMs >= 0
+              ? "LIVE · " + root.service.connection.latencyMs + " MS"
+              : "LIVE"
+            emphasized: true
+            foreground: root.foreground
+          }
+
+          StatusBadge {
+            visible: !endpointRow.modelData.enabled
+            anchors.verticalCenter: parent.verticalCenter
+            text: "OFF"
+            foreground: root.foreground
+          }
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          elide: Text.ElideMiddle
+          text: endpointRow.modelData.baseUrl
+          color: Qt.darker(root.foreground, 1.4)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          wrapMode: Text.WordWrap
+          visible: text !== ""
+          text: {
+            switch (root.endpointProbes[endpointRow.modelData.id]) {
+              case "ok": return "Reachable from this machine."
+              case "unreachable": return "Not reachable from this machine — the address may need "
+                + "a VPN or a resolver this client doesn't have."
+              case "rejected": return "Reached it, but the API key was refused."
+              case "odd": return "Answered, but not like an Unraid API."
+              default: return ""
+            }
+          }
+          color: root.endpointProbes[endpointRow.modelData.id] === "ok"
+            ? Qt.darker(root.foreground, 1.4) : Color.urgent
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+
+        Row {
+          spacing: Style.space(6)
+
+          Button {
+            text: "↑"
+            foreground: root.foreground
+            onClicked: root.service.moveEndpoint(endpointRow.modelData.id, -1)
+          }
+
+          Button {
+            text: "↓"
+            foreground: root.foreground
+            onClicked: root.service.moveEndpoint(endpointRow.modelData.id, 1)
+          }
+
+          Button {
+            text: endpointRow.modelData.enabled ? "Disable" : "Enable"
+            foreground: root.foreground
+            onClicked: root.service.setEndpointEnabled(endpointRow.modelData.id,
+              !endpointRow.modelData.enabled)
+          }
+
+          Button {
+            text: {
+              var v = root.endpointProbes[endpointRow.modelData.id]
+              return v === "testing" ? "Testing…" : "Test"
+            }
+            foreground: root.foreground
+            onClicked: root.testEndpoint(endpointRow.modelData)
+          }
+
+          Button {
+            // Removing the only endpoint would leave nothing to connect
+            // to, which is a worse state than a disabled one.
+            visible: root._endpoints.length > 1
+            text: "Remove"
+            foreground: Color.urgent
+            onClicked: root.service.removeEndpoint(endpointRow.modelData.id)
+          }
+        }
+
+        PanelSeparator { width: parent.width; foreground: root.foreground; strength: 0.06 }
+      }
+    }
+
+    // ----------------------------------------------------------- discovery
+    Row {
+      spacing: Style.space(8)
+      visible: !root.editingServer
+
+      Button {
+        text: root.service && root.service.discovering ? "Detecting…" : "Detect endpoints"
+        bordered: true
+        foreground: root.foreground
+        enabled: root.service && !root.service.discovering
+        onClicked: root.service.discoverEndpoints()
       }
 
       Button {
-        text: "Edit"
+        text: "Add manually"
         bordered: true
         foreground: root.foreground
         onClicked: {
-          root.editServerInput = root.configStore ? root.configStore.serverUrl : ""
+          root.editServerInput = ""
           root.editingServer = true
         }
       }
     }
 
+    Text {
+      textFormat: Text.PlainText
+      width: parent.width
+      wrapMode: Text.WordWrap
+      visible: root.service && root.service.discoveryNote !== ""
+      text: root.service ? root.service.discoveryNote : ""
+      color: Qt.darker(root.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    // Discovery proposes; it never adopts (spec section 42).
+    Column {
+      width: parent.width
+      spacing: Style.space(4)
+      visible: root._discovered.length > 0
+
+      PanelSectionHeader { text: "DETECTED"; foreground: root.foreground }
+
+      Repeater {
+        model: root._discovered
+
+        Row {
+          id: candidateRow
+          required property var modelData
+          width: root.width
+          spacing: Style.space(6)
+
+          Column {
+            width: parent.width - Style.space(80)
+            spacing: 0
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideRight
+              text: candidateRow.modelData.name
+              color: root.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              elide: Text.ElideMiddle
+              text: candidateRow.modelData.baseUrl
+              color: Qt.darker(root.foreground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+          }
+
+          Button {
+            text: "Add"
+            bordered: true
+            foreground: root.foreground
+            onClicked: root.service.addEndpoint(candidateRow.modelData)
+          }
+        }
+      }
+    }
+
+    // Manual add, reusing the address field and normalisation that
+    // onboarding uses.
     Column {
       width: parent.width
       visible: root.editingServer
@@ -132,6 +395,7 @@ Column {
       TextField {
         id: serverField
         width: parent.width
+        placeholderText: "http://tower.local"
         text: root.editServerInput
         foreground: root.foreground
         onTextChanged: {
@@ -146,7 +410,7 @@ Column {
         spacing: Style.space(8)
 
         Button {
-          text: "Save"
+          text: "Add"
           bordered: true
           foreground: root.foreground
           enabled: root.editServerInput.trim() !== ""

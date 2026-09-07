@@ -27,6 +27,9 @@ Column {
   readonly property var _pending: service ? service.vmActionPending : null
   readonly property bool _busy: root._pending !== null && root._pending !== undefined
   readonly property bool _forbidden: service ? service.vmControlsForbidden : false
+  // Spec section 34: while offline the panel shows cached state, and
+  // acting on it would be acting on a guess.
+  readonly property bool _offline: service ? service.offline : false
 
   readonly property string _state: root.domain ? root.domain.state : ""
   readonly property bool _running: root._state === "RUNNING"
@@ -129,12 +132,23 @@ Column {
         }
       }
 
+      Text {
+        textFormat: Text.PlainText
+        visible: root._offline && !root._forbidden
+        width: parent.width
+        wrapMode: Text.WordWrap
+        text: "Controls are unavailable while the server is unreachable."
+        color: Qt.darker(root.foreground, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+      }
+
       // Starting a stopped VM and pausing/resuming a running one aren't
       // destructive, so they act immediately; stop and reboot confirm
       // first (spec section 24).
       Row {
         spacing: Style.space(8)
-        visible: !root._forbidden
+        visible: !root._forbidden && !root._offline
 
         Button {
           visible: !root._running && !root._paused
@@ -182,7 +196,7 @@ Column {
     // force stop isn't a neighbour of the everyday buttons.
     Column {
       width: parent.width
-      visible: !root._forbidden && (root._running || root._paused)
+      visible: !root._forbidden && !root._offline && (root._running || root._paused)
       spacing: Style.space(6)
 
       PanelSectionHeader { text: "MORE"; foreground: root.foreground }

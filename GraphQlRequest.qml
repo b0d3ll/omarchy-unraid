@@ -23,6 +23,11 @@ Item {
   property string endpoint: ""
   property var secretStore: null
 
+  // Data queries get a generous window; connectivity probes want the
+  // spec's 1.5-2s (section 32) so a dead endpoint is ruled out quickly
+  // instead of stalling failover for twelve seconds.
+  property int timeoutSeconds: 12
+
   readonly property bool busy: _busy
   property bool _busy: false
 
@@ -113,7 +118,8 @@ Item {
       // GraphQL the body IS the diagnosis ("Cannot query field ...", or an
       // auth rejection). Errors are read out of the JSON instead, and a
       // genuine connection failure still shows up as a curl exit code.
-      + ' && curl -sS --max-time 12 -K "$CFGFILE" -X POST'
+      + ' && curl -sS --max-time ' + Math.max(1, root.timeoutSeconds)
+      + ' -K "$CFGFILE" -X POST'
       + ' --data "$OMARCHY_UNRAID_QUERY" "$OMARCHY_UNRAID_URL"']
     proc.running = true
   }
@@ -124,7 +130,10 @@ Item {
   // Turn any such hang into an ordinary retryable failure.
   Timer {
     id: watchdog
-    interval: 25000
+    // Comfortably past curl's own timeout, so this only ever fires for a
+    // reply that got lost rather than one that's merely slow. Derived from
+    // the timeout so a 2s probe isn't held hostage for 25s.
+    interval: Math.max(8000, (root.timeoutSeconds + 6) * 1000)
     repeat: false
     onTriggered: {
       if (!root._busy) return

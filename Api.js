@@ -65,6 +65,124 @@ function mutationDockerRestart(id) {
   return "mutation { docker { restart(id: " + JSON.stringify(id) + ") { id state status } } }"
 }
 
+// ------------------------------------------------------ endpoint discovery
+//
+// What the server itself advertises (spec section 29 step 3). On a real
+// 7.3.2 box this returns only LAN-shaped entries — DEFAULT/LAN/MDNS —
+// and no WIREGUARD, so this alone can't find a remote path; the local
+// Tailscale client fills that gap (see tailscaleCandidates below).
+var QUERY_ACCESS_URLS = "{ network { accessUrls { type name ipv4 ipv6 } } }"
+
+function normalizeAccessUrls(data) {
+  var urls = (data && data.network && data.network.accessUrls) || []
+  return urls.map(function(u) {
+    return {
+      type: u.type || "",
+      name: u.name || "",
+      ipv4: u.ipv4 || "",
+      ipv6: u.ipv6 || ""
+    }
+  })
+}
+
+function normalizeBaseUrl(url) {
+  var trimmed = String(url || "").trim().replace(/\/+$/, "")
+  if (trimmed === "") return ""
+  if (!/^https?:\/\//i.test(trimmed)) trimmed = "http://" + trimmed
+  return trimmed
+}
+
+function graphqlUrlFor(baseUrl) {
+  var base = normalizeBaseUrl(baseUrl)
+  if (base === "") return ""
+  return /\/graphql$/i.test(base) ? base : base + "/graphql"
+}
+
+function makeEndpoint(id, type, name, baseUrl, priority) {
+  var base = normalizeBaseUrl(baseUrl)
+  return {
+    id: id,
+    type: type,
+    name: name,
+    baseUrl: base,
+    graphqlUrl: graphqlUrlFor(base),
+    priority: priority,
+    enabled: true
+  }
+}
+
+// Server-advertised candidates worth offering. The IP entry is usually
+// already configured, so the valuable one is the mDNS name: it keeps
+// working when DHCP hands the server a different address. WAN entries are
+// deliberately ignored — spec section 41 says never reach for a public
+// URL automatically.
+function accessUrlCandidates(urls, existingGraphqlUrls) {
+  var seen = {}
+  for (var i = 0; i < (existingGraphqlUrls || []).length; i++) seen[existingGraphqlUrls[i]] = true
+  var out = []
+  for (var j = 0; j < (urls || []).length; j++) {
+    var u = urls[j]
+    var type = String(u.type || "").toUpperCase()
+    if (type !== "LAN" && type !== "MDNS" && type !== "DEFAULT") continue
+    if (!u.ipv4) continue
+    var candidate = makeEndpoint("lan-" + type.toLowerCase() + "-" + j, "LAN",
+      u.name || type, u.ipv4, 10 + j)
+    if (candidate.graphqlUrl === "" || seen[candidate.graphqlUrl]) continue
+    seen[candidate.graphqlUrl] = true
+    out.push(candidate)
+  }
+  return out
+}
+
+// Match a Tailscale peer to this server by its short DNS name against the
+// configured hostname — `tower.tail….ts.net` vs `Tower`. Mirrors what
+// Omarchy's own tailscale plugin does in
+// plugins/panels/tailscale/Model.js (shortDnsName / filterIPv4 on 100.*).
+//
+// Conservative on purpose (spec section 42): a peer that merely looks
+// VPN-ish is not assumed to be the server, and what comes back here is a
+// *proposal* for the user to confirm, never something adopted silently.
+function tailscaleCandidates(statusJson, hostname, existingGraphqlUrls) {
+  var seen = {}
+  for (var i = 0; i < (existingGraphqlUrls || []).length; i++) seen[existingGraphqlUrls[i]] = true
+
+  var status = null
+  try { status = JSON.parse(statusJson || "") } catch (e) { return [] }
+  if (!status) return []
+
+  var want = String(hostname || "").trim().toLowerCase()
+  if (want === "") return []
+
+  var peers = status.Peer || {}
+  var out = []
+  for (var key in peers) {
+    var peer = peers[key]
+    if (!peer) continue
+    var short = shortDnsName(peer.DNSName)
+    if (short.toLowerCase() !== want) continue
+    var ips = peer.TailscaleIPs || []
+    for (var j = 0; j < ips.length; j++) {
+      // IPv4 in the tailnet range only; a bare IPv6 literal would need
+      // bracketing and buys nothing here.
+      if (!/^100\./.test(String(ips[j]))) continue
+      var candidate = makeEndpoint("tailscale-" + short, "TAILSCALE",
+        "Tailscale (" + short + ")", "http://" + ips[j], 20)
+      if (seen[candidate.graphqlUrl]) continue
+      seen[candidate.graphqlUrl] = true
+      out.push(candidate)
+      break
+    }
+  }
+  return out
+}
+
+function shortDnsName(name) {
+  var clean = String(name || "")
+  if (clean.charAt(clean.length - 1) === ".") clean = clean.slice(0, -1)
+  if (clean === "") return ""
+  return clean.split(".")[0] || clean
+}
+
 // ----------------------------------------------------------- vm operations
 //
 // These sit under `vm` (singular) even though the query root is `vms`, and
