@@ -274,10 +274,22 @@ Panel {
           anchors.top: parent.top
           anchors.left: parent.left
           anchors.right: parent.right
-          height: hero.implicitHeight + tabRow.implicitHeight + separator1.height + separator2.height + Style.space(20)
+          // Measured off the column rather than restated as a sum of its
+          // parts. The hand-written version counted the column's three 10px
+          // gaps as 20, so the trailing separator hung 10px below
+          // headerArea.bottom — into the scroll area, where it drew a line
+          // straight through the first row of every view (most visibly
+          // through Overview's red "attention needed" banner).
+          //
+          // The trailing space(10) is the gap between that separator and the
+          // content, matching the rhythm inside the column.
+          height: headerColumn.implicitHeight + Style.space(10)
 
           Column {
-            anchors.fill: parent
+            id: headerColumn
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
             spacing: Style.space(10)
 
             PanelHero {
