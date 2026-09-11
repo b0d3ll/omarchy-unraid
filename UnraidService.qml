@@ -133,6 +133,7 @@ Item {
       : kind === "pause" ? Api.mutationVmPause(domain.id)
       : kind === "resume" ? Api.mutationVmResume(domain.id)
       : kind === "forceStop" ? Api.mutationVmForceStop(domain.id)
+      : kind === "reset" ? Api.mutationVmReset(domain.id)
       : ""
     if (query === "") return
     actionPending = { scope: "vm", id: domain.id, kind: kind, name: domain.name }

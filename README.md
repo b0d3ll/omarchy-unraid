@@ -52,8 +52,11 @@ and alerts are announced — INFO notices are listed, never pushed.
 - Docker: live container list with state, update badges and search, plus a
   per-container detail view with controls and logs.
 - VMs: live list plus a per-VM detail view with start/stop/reboot and,
-  under "More", pause and force stop — the latter behind a confirmation
-  that spells out that it's the equivalent of cutting power.
+  under "More", pause, reset and force stop. That is every VM mutation the
+  API exposes. Reset and force stop are each behind a confirmation that
+  spells out what they do — reset is libvirt's hard reset (the case's reset
+  button, no shutdown sequence), force stop the equivalent of cutting
+  power.
 - Storage: array state and capacity, the disabled/missing/invalid counts,
   parity status, and a per-disk list — parity, array disks and pools, each
   with its spin state, temperature, usage and status. A spun-down drive is
@@ -61,9 +64,7 @@ and alerts are announced — INFO notices are listed, never pushed.
   rotating drives are currently spinning. The counters are counted from
   per-disk status rather than read off `vars` — see below.
 - Notices: every unread notification, filterable by All / Info / Warnings /
-  Critical. Click one to open it in the Unraid WebUI, or archive it. The
-  tab's count stays the warning+alert count, so a nightly "Docker Auto
-  Update" notice is visible without being alarming.
+  Critical. Click one to open it in the Unraid WebUI, or archive it.
 - Settings: live Unraid/API version and uptime, plus editing the server
   address and replacing the API key.
 - Settings > Connections: the endpoint list with priority order, live
@@ -178,10 +179,36 @@ started" sat on screen as a warning while "Disk-Clear finished (0 errors)"
 was filtered out. `notifications.list(filter: { type: UNREAD, … })` with no
 `importance` returns every level.
 
-What stays keyed to warnings and alerts only: the tab's count, the health
-dot, the Overview banner, and desktop notifications. Listing an INFO notice
-should not make the bar look alarmed or ping the desktop three times a
-week.
+What stays keyed to warnings and alerts only: the health dot, the Overview
+banner, and desktop notifications. Listing an INFO notice should not make
+the bar look alarmed or ping the desktop three times a week.
+
+## What drives the health dot, and how to clear it
+
+The bar's dot, its label, and Overview's banner are three renderings of one
+ladder in `Panel.qml`'s `healthState`, checked top down:
+
+| Condition | State |
+| --- | --- |
+| Not configured / API key rejected / unreachable / stale | own states |
+| A missing array disk | CRITICAL |
+| An unread **alert** | CRITICAL |
+| The last parity check found errors | WARNING |
+| An unread **warning** | WARNING |
+| A disabled or invalid array disk | NOTICE |
+| Parity check running, or array not started | NOTICE |
+| otherwise | HEALTHY |
+
+So it is state, not a message: nothing is dismissible on its own, and each
+rung clears when the condition underneath it stops being true. The unread
+rungs are the ones under your control — archive the notification (in
+Notices, or in the Unraid WebUI) and the dot drops to the next true rung.
+An "attention needed" that will not go away usually means an old unread
+warning is still sitting in the list.
+
+The tab carries no count. The dot and the banner already say that
+something needs attention, and all three read the same unread
+warning+alert figure — a third copy of one number said nothing new.
 
 Compact rows show a notification's `subject` ("Docker Auto Update",
 "Disk-Clear finished (0 errors)") rather than its `title` ("Community

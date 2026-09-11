@@ -253,6 +253,10 @@ function mutationVmReboot(id) { return mutationVm("reboot", id) }
 function mutationVmPause(id) { return mutationVm("pause", id) }
 function mutationVmResume(id) { return mutationVm("resume", id) }
 function mutationVmForceStop(id) { return mutationVm("forceStop", id) }
+// The API also exposes `reset`, which libvirt defines as an immediate hard
+// reset — the reset button on the case, not a reboot. No shutdown sequence
+// runs, so it belongs with forceStop rather than with reboot.
+function mutationVmReset(id) { return mutationVm("reset", id) }
 
 // Logs are readable with a plain read-only key, unlike the mutations above.
 function queryDockerLogs(id, tail) {

@@ -98,9 +98,6 @@ Panel {
     { key: "docker", label: "Docker" },
     { key: "vms", label: "VMs" },
     { key: "storage", label: "Storage" },
-    // Shows every unread notice now, not only the ones that need
-    // attention — the count stays the attention count, which is what the
-    // health dot and the banner key off.
     { key: "alerts", label: "Notices" }
   ]
 
@@ -381,9 +378,11 @@ Panel {
 
                 Button {
                   required property var modelData
-                  text: modelData.key === "alerts" && root.service.unreadNotificationCount > 0
-                    ? modelData.label + " (" + root.service.unreadNotificationCount + ")"
-                    : modelData.label
+                  // No count on the tab. The bar's health dot and Overview's
+                  // banner already carry "something needs attention", and
+                  // all three are driven by the same unread warning/alert
+                  // figure — a third copy of one number said nothing new.
+                  text: modelData.label
                   bordered: true
                   selected: root.tabIsActive(modelData.key)
                   foreground: root.barForeground
@@ -454,6 +453,22 @@ Panel {
     }
   }
 
+  // Past tense per action, rather than a chain ending in a catch-all: the
+  // catch-all meant a new action reported itself as "force stopped", and the
+  // failure branch built its verb as kind + "ed" — "reseted", "forceStoped".
+  function vmActionPastTense(kind) {
+    switch (kind) {
+      case "start": return "started"
+      case "stop": return "stopped"
+      case "reboot": return "rebooted"
+      case "pause": return "paused"
+      case "resume": return "resumed"
+      case "reset": return "reset"
+      case "forceStop": return "force stopped"
+      default: return "updated"
+    }
+  }
+
   // Spec section 45: report the outcome once the server has confirmed it.
   Connections {
     target: root.service
@@ -474,15 +489,9 @@ Panel {
 
     function onVmActionFinished(name, kind, ok, message) {
       if (ok) {
-        var verb = kind === "start" ? "started"
-          : kind === "stop" ? "stopped"
-          : kind === "reboot" ? "rebooted"
-          : kind === "pause" ? "paused"
-          : kind === "resume" ? "resumed"
-          : "force stopped"
-        toast.show(name + " " + verb)
+        toast.show(name + " " + root.vmActionPastTense(kind))
       } else {
-        toast.show(message !== "" ? message : name + " could not be " + kind + "ed")
+        toast.show(message !== "" ? message : name + " could not be " + root.vmActionPastTense(kind))
       }
     }
   }

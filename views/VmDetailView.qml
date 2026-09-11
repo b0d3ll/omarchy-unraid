@@ -214,6 +214,24 @@ Column {
           onClicked: root.service.vmAction("pause", root.domain)
         }
 
+        // libvirt's `reset` is the case's reset button: the machine is
+        // yanked back to POST with no shutdown sequence at all. Confirmed
+        // for the same reason force stop is, and worded so the difference
+        // from Reboot is the first thing read.
+        Button {
+          // Running only, like Pause. libvirt's reset acts on a live
+          // domain; a stopped VM has nothing to reset.
+          visible: root._running
+          text: root.pendingLabel("reset", "Reset")
+          bordered: true
+          foreground: Color.urgent
+          enabled: !root._busy
+          onClicked: root.confirmRequested(
+            "Reset " + root.domain.name + "?\n\nThis restarts it immediately without "
+              + "shutting down first, like the reset button on a PC. Unsaved work is lost.",
+            "Reset", "reset")
+        }
+
         // Spec section 24 wants this one spelled out: it's the equivalent
         // of pulling the power cable, so the confirmation says so in those
         // terms rather than asking a vague "are you sure".
