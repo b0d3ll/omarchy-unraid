@@ -76,8 +76,7 @@ Column {
         serverUrl: root.pendingBaseUrl,
         graphqlUrl: root.pendingGraphqlUrl,
         hostname: connectionTest.resultHostname,
-        unraidVersion: connectionTest.resultVersion,
-        lastTestedAt: new Date().toISOString()
+        unraidVersion: connectionTest.resultVersion
       })
       root.step = 3
     })

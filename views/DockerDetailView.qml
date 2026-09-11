@@ -84,7 +84,7 @@ Column {
 
       Text {
         textFormat: Text.PlainText
-        text: root.container ? root.container.state : ""
+        text: root.container ? root.container.stateLabel : ""
         color: root.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.body

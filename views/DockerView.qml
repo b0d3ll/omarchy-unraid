@@ -141,7 +141,7 @@ Column {
           anchors.right: chevron.left
           anchors.rightMargin: Style.space(8)
           anchors.verticalCenter: parent.verticalCenter
-          text: row.modelData.state
+          text: row.modelData.stateLabel.toUpperCase()
           foreground: root.foreground
         }
 

@@ -28,9 +28,13 @@ Item {
   property string serverUrl: ""
   property string graphqlUrl: ""
   property string hostname: ""
+  // `apiVersion` and `lastTestedAt` used to live here too. Neither was ever
+  // read: Settings shows the live `service.system.apiVersion` from the
+  // running poll, and nothing displayed a last-tested time. apiVersion was
+  // never even written — onboarding saves hostname and unraidVersion only —
+  // so it sat empty in every config file on disk. Old keys are dropped on
+  // the next save; nothing reads them on the way in.
   property string unraidVersion: ""
-  property string apiVersion: ""
-  property string lastTestedAt: ""
 
   // [{ id, type, name, baseUrl, graphqlUrl, priority, enabled }]
   property var endpoints: []
@@ -47,8 +51,6 @@ Item {
     root.graphqlUrl = typeof data.graphqlUrl === "string" ? data.graphqlUrl : ""
     root.hostname = typeof data.hostname === "string" ? data.hostname : ""
     root.unraidVersion = typeof data.unraidVersion === "string" ? data.unraidVersion : ""
-    root.apiVersion = typeof data.apiVersion === "string" ? data.apiVersion : ""
-    root.lastTestedAt = typeof data.lastTestedAt === "string" ? data.lastTestedAt : ""
     root.endpoints = root._migrateEndpoints(data)
     root.desktopNotifications = data.desktopNotifications === true
     root.loaded = true
@@ -104,8 +106,6 @@ Item {
       graphqlUrl: fields.graphqlUrl !== undefined ? fields.graphqlUrl : root.graphqlUrl,
       hostname: fields.hostname !== undefined ? fields.hostname : root.hostname,
       unraidVersion: fields.unraidVersion !== undefined ? fields.unraidVersion : root.unraidVersion,
-      apiVersion: fields.apiVersion !== undefined ? fields.apiVersion : root.apiVersion,
-      lastTestedAt: fields.lastTestedAt !== undefined ? fields.lastTestedAt : root.lastTestedAt,
       endpoints: fields.endpoints !== undefined ? fields.endpoints : root.endpoints,
       desktopNotifications: fields.desktopNotifications !== undefined
         ? fields.desktopNotifications : root.desktopNotifications
@@ -122,7 +122,7 @@ Item {
 
   function clear() {
     save({ serverUrl: "", graphqlUrl: "", hostname: "", unraidVersion: "",
-      apiVersion: "", lastTestedAt: "", endpoints: [] })
+      endpoints: [] })
   }
 
   Process {

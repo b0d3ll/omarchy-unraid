@@ -60,7 +60,7 @@ var QUERY_ARRAY = "{ array { state capacity { kilobytes { used free total } } "
   + "parities { " + DISK_FIELDS + " } "
   + "disks { " + DISK_FIELDS + " } "
   + "caches { " + DISK_FIELDS + " } } "
-  + "vars { mdNumDisks mdNumDisabled mdNumInvalid mdNumMissing cacheNumDevices } }"
+  + "vars { mdNumDisks mdNumDisabled mdNumInvalid mdNumMissing } }"
 
 // Parity history. Its own operation and its own slow poll: it takes no
 // arguments, so the server sends every check it has ever logged (~100 rows,
@@ -411,7 +411,12 @@ function arrayDiskCounts(drives, vars) {
       disabled: num(vars.mdNumDisabled, null),
       invalid: num(vars.mdNumInvalid, null),
       missing: num(vars.mdNumMissing, null),
-      cacheDevices: num(vars.cacheNumDevices, null),
+      // `vars` has no usable pool count. cacheNumDevices is the legacy
+      // single-cache figure and answers NaN on any server with named pools
+      // — a partial GraphQL error on every single array poll, for a number
+      // that then rendered as "—" anyway. Dropped from the query; without
+      // the pool list there is simply no answer, and null says so.
+      cacheDevices: null,
       derived: false
     }
   }
@@ -649,7 +654,8 @@ function normalizeDocker(data) {
       return {
         id: c.id,
         name: containerName(c),
-        state: c.state || "UNKNOWN",
+        state: c.state || "",
+        stateLabel: containerStateLabel(c.state),
         status: c.status || "",
         autoStart: c.autoStart === true,
         updateAvailable: c.isUpdateAvailable === true,
@@ -657,6 +663,26 @@ function normalizeDocker(data) {
       }
     })
   }
+}
+
+// ContainerState is Docker's vocabulary. Unraid's own Docker page words
+// these as started/stopped/paused, and the panel already speaks that way
+// for VMs and the array, so a stopped container should not be the one place
+// still shouting EXITED. RESTARTING and DEAD aren't in the enum but are
+// real Docker states that Model.dockerStateRank already sorts for, so they
+// get labels too rather than falling through.
+var CONTAINER_STATE_LABELS = {
+  RUNNING: "Running",
+  PAUSED: "Paused",
+  EXITED: "Stopped",
+  RESTARTING: "Restarting",
+  DEAD: "Dead"
+}
+
+function containerStateLabel(state) {
+  var key = String(state || "")
+  if (key === "") return "Unknown"
+  return CONTAINER_STATE_LABELS[key] || key.charAt(0) + key.slice(1).toLowerCase().replace(/_/g, " ")
 }
 
 // VmState is libvirt's own domain-state enum, handed through unchanged, so

@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "../components"
@@ -25,6 +26,34 @@ Column {
   property string editServerInput: ""
   property bool editingKey: false
   property string editKeyInput: ""
+
+  // Name and version come from manifest.json rather than being typed out
+  // again here. They were duplicated by hand, which meant bumping the
+  // manifest left About quietly claiming the old version.
+  //
+  // Resolved relative to this file, so it follows the plugin wherever it is
+  // installed; FileView wants a filesystem path, not the file:// URL
+  // Qt.resolvedUrl hands back.
+  property string pluginLabel: "Unraid Companion"
+
+  function applyManifest(json) {
+    try {
+      var m = JSON.parse(json)
+      var name = m && typeof m.name === "string" ? m.name : "Unraid Companion"
+      var version = m && typeof m.version === "string" ? m.version : ""
+      root.pluginLabel = version !== "" ? name + " " + version : name
+    } catch (e) {
+      root.pluginLabel = "Unraid Companion"
+    }
+  }
+
+  FileView {
+    id: manifestFile
+    path: String(Qt.resolvedUrl("../manifest.json")).replace(/^file:\/\//, "")
+    printErrors: false
+    onLoaded: root.applyManifest(text())
+    onLoadFailed: root.applyManifest("")
+  }
 
   // See SetupView's cleanInput(): a pasted value can carry newlines, and
   // a newline in the API key breaks the curl config the test builds.
@@ -588,7 +617,7 @@ Column {
     PanelSectionHeader { text: "ABOUT"; foreground: root.foreground }
     Text {
       textFormat: Text.PlainText
-      text: "Unraid Companion 0.1.0"
+      text: root.pluginLabel
       color: Qt.darker(root.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall

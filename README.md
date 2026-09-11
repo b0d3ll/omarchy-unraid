@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.1 complete.** Onboarding saves a real server URL and
+**Status: v0.2.0.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -224,19 +224,28 @@ Compact rows show a notification's `subject` ("Docker Auto Update",
 Applications"), which is the component that raised it and repeats across
 everything it sends.
 
-## VM and array state
+## State vocabulary
 
-`VmState` is libvirt's own domain-state enum passed through unchanged, so a
-VM that is off reports `SHUTOFF`. Unraid's VM manager calls that "Stopped",
+Three different enums reach the panel raw, and all three now get labels
+from the same source Unraid's own webGUI words them with.
+
+`VmState` is libvirt's domain-state enum passed through unchanged, so a VM
+that is off reports `SHUTOFF`. Unraid's VM manager calls that "Stopped",
 which is the word the panel uses — "Offline" would suggest the VM can't be
 reached rather than that it simply isn't running. All eight states have
 labels.
+
+`ContainerState` is Docker's vocabulary — `RUNNING` / `PAUSED` / `EXITED`.
+Unraid's Docker page words these as started/stopped/paused, so a stopped
+container reads "Stopped" rather than "Exited". `RESTARTING` and `DEAD`
+aren't in the enum but are real Docker states that the sort order already
+accounts for, so they get labels too.
 
 `array.state` is likewise the API's `ArrayState` enum, straight from
 emhttp's `mdState` — "Started" and "Stopped" are the Unraid webGUI's own
 wording, which is why the panel keeps them. Its other nine values are error
 states (`TOO_MANY_MISSING_DISKS`, `PARITY_NOT_BIGGEST`, …) that used to
-render raw. Both enums now fall back to a sentence-cased version of an
+render raw. All three fall back to a sentence-cased version of an
 unknown future value rather than shouting it.
 
 ## Roadmap
@@ -266,6 +275,22 @@ that `parityCheckStatus.date` is when a check *started* while
 
 A running check reports no error count anywhere, so the progress view
 shows percentage and speed and says nothing about errors.
+
+## Dead weight removed in 0.2.0
+
+`vars.cacheNumDevices` is gone from the array query. It is the legacy
+single-cache count and answers `NaN` on any server with named pools, which
+meant a partial GraphQL error on *every* array poll for a number that then
+rendered as "—". The pool count comes from the pool list instead.
+
+`configStore.apiVersion` and `configStore.lastTestedAt` are gone too.
+Neither was ever read — Settings shows the live `service.system.apiVersion`
+from the running poll — and `apiVersion` was never even written, so it sat
+empty in every config file on disk. Old keys are dropped on the next save.
+
+The About line reads its name and version from `manifest.json` at runtime
+rather than repeating them, so bumping the manifest can no longer leave it
+quietly claiming the old version.
 
 ## Disk counters
 
