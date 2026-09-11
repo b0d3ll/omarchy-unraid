@@ -71,15 +71,15 @@ can be found, opened and restarted without touching the mouse.
 
 | Overview | Docker | Storage |
 | --- | --- | --- |
-| ![Overview](docs/screenshots/01-overview.png) | ![Docker](docs/screenshots/02-docker.png) | ![Storage](docs/screenshots/04-storage.png) |
+| <img src="docs/screenshots/01-overview.png" width="250"> | <img src="docs/screenshots/02-docker.png" width="250"> | <img src="docs/screenshots/04-storage.png" width="250"> |
 
 | VMs | Container detail | Notices |
 | --- | --- | --- |
-| ![VMs](docs/screenshots/03-vms.png) | ![Detail](docs/screenshots/06-docker-detail.png) | ![Notices](docs/screenshots/05-notices.png) |
+| <img src="docs/screenshots/03-vms.png" width="250"> | <img src="docs/screenshots/06-docker-detail.png" width="250"> | <img src="docs/screenshots/05-notices.png" width="250"> |
 
 | Settings | | |
 | --- | --- | --- |
-| ![Settings](docs/screenshots/07-settings.png) | | |
+| <img src="docs/screenshots/07-settings.png" width="250"> | | |
 
 The walkthrough above, and every shot here, was captured by driving the
 panel from the keyboard — which is also what it demonstrates. A copy of
