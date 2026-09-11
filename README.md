@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar — Docker, VMs,
 the array, parity and notifications, over Unraid's own GraphQL API.
 
-![Overview](docs/screenshots/01-overview.png)
+https://github.com/user-attachments/assets/6779a169-43d1-4036-b805-82160848f562
 
 ## Install
 
@@ -67,18 +67,23 @@ Omarchy is keyboard-driven, so the panel is too.
 Horizontal is *which tab*, vertical is *which thing in it*. A container
 can be found, opened and restarted without touching the mouse.
 
-[**Watch a walkthrough**](docs/demo.mp4) — the whole panel, driven entirely
-from the keyboard.
-
 ## Screenshots
 
-| Docker | Storage | Notices |
+| Overview | Docker | Storage |
 | --- | --- | --- |
-| ![Docker](docs/screenshots/02-docker.png) | ![Storage](docs/screenshots/04-storage.png) | ![Notices](docs/screenshots/05-notices.png) |
+| ![Overview](docs/screenshots/01-overview.png) | ![Docker](docs/screenshots/02-docker.png) | ![Storage](docs/screenshots/04-storage.png) |
 
-| VMs | Container detail | Settings |
+| VMs | Container detail | Notices |
 | --- | --- | --- |
-| ![VMs](docs/screenshots/03-vms.png) | ![Detail](docs/screenshots/06-docker-detail.png) | ![Settings](docs/screenshots/07-settings.png) |
+| ![VMs](docs/screenshots/03-vms.png) | ![Detail](docs/screenshots/06-docker-detail.png) | ![Notices](docs/screenshots/05-notices.png) |
+
+| Settings | | |
+| --- | --- | --- |
+| ![Settings](docs/screenshots/07-settings.png) | | |
+
+The walkthrough above, and every shot here, was captured by driving the
+panel from the keyboard — which is also what it demonstrates. A copy of
+the clip lives in [`docs/demo.mp4`](docs/demo.mp4).
 
 ## Requirements
 
