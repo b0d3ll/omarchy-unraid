@@ -45,7 +45,10 @@ Column {
   readonly property var _docker: service ? service.docker : ({})
   readonly property var _vms: service ? service.vms : ({})
   readonly property int _unread: service ? service.unreadNotificationCount : 0
-  readonly property var _recent: service ? service.notifications.slice(0, 3) : []
+  // Five, not three: a notice that resolves an alarm arrives after it, so a
+  // three-row window could show the all-clear with the warning it answers
+  // already pushed off the end — or, on a chatty day, neither.
+  readonly property var _recent: service ? service.notifications.slice(0, 5) : []
 
   readonly property int _diskProblems:
     (root._array.disabled || 0) + (root._array.missing || 0) + (root._array.invalid || 0)
@@ -384,10 +387,12 @@ Column {
         width: root.width
         spacing: Style.space(6)
 
+        // RECENT now draws from every unread notice, not just warnings, so
+        // the entry that resolves an alarm shows up right under it.
         Text {
           textFormat: Text.PlainText
-          text: entry.modelData.importance === "WARNING" || entry.modelData.importance === "ALERT" ? "⚠" : "✓"
-          color: entry.modelData.importance === "WARNING" || entry.modelData.importance === "ALERT" ? Color.urgent : Qt.darker(root.foreground, 1.4)
+          text: entry.modelData.needsAttention ? "⚠" : "✓"
+          color: entry.modelData.needsAttention ? Color.urgent : Color.accent
           font.family: Style.font.family
           font.pixelSize: Style.font.body
         }
@@ -400,7 +405,7 @@ Column {
             textFormat: Text.PlainText
             width: parent.width
             elide: Text.ElideRight
-            text: entry.modelData.title
+            text: entry.modelData.summary
             color: root.foreground
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall

@@ -5,9 +5,15 @@ import qs.Ui
 import "../components"
 import "../Model.js" as Model
 
-// Notification list with an All/Warnings/Critical filter (spec section 27).
-// A row click opens the notification's target in the Unraid WebUI when it
-// has one; Archive clears it from the server's unread list.
+// Unread notification list with an All/Info/Warnings/Critical filter (spec
+// section 27). A row click opens the notification's target in the Unraid
+// WebUI when it has one; Archive clears it from the server's unread list.
+//
+// This used to list warnings and alerts only, which meant a notice could
+// resolve an alarm without the panel ever saying so — "Disk-Clear started"
+// stayed on screen as a warning while "Disk-Clear finished (0 errors)" was
+// filtered out. INFO notices are marked with an accent tick (the palette's
+// only "this is fine" colour; Omarchy defines no green — see StatusDot).
 Column {
   id: root
 
@@ -17,13 +23,19 @@ Column {
   signal toastRequested(string message)
 
   readonly property var _all: service ? service.notifications : []
-  readonly property var _filters: ["All", "Warnings", "Critical"]
+  readonly property var _filters: ["All", "Info", "Warnings", "Critical"]
   property int filterIndex: 0
 
+  readonly property var _importanceForFilter: ["", "INFO", "WARNING", "ALERT"]
+  readonly property var _emptyMessages: [
+    "No unread notifications.", "No unread notices.",
+    "No unread warnings.", "No unread alerts."
+  ]
+
   readonly property var _filtered: {
-    if (root.filterIndex === 1) return root._all.filter(function(n) { return n.importance === "WARNING" })
-    if (root.filterIndex === 2) return root._all.filter(function(n) { return n.importance === "ALERT" })
-    return root._all
+    var want = root._importanceForFilter[root.filterIndex] || ""
+    if (want === "") return root._all
+    return root._all.filter(function(n) { return n.importance === want })
   }
 
   function openNotification(item) {
@@ -60,7 +72,7 @@ Column {
   EmptyState {
     width: parent.width
     visible: root._filtered.length === 0
-    message: "No warnings or alerts."
+    message: root._emptyMessages[root.filterIndex] || "No unread notifications."
     foreground: root.foreground
   }
 
@@ -75,8 +87,7 @@ Column {
         id: entry
         required property var modelData
 
-        readonly property bool urgent: entry.modelData.importance === "WARNING"
-          || entry.modelData.importance === "ALERT"
+        readonly property bool urgent: entry.modelData.needsAttention
 
         width: root.width
         implicitHeight: entryColumn.implicitHeight + Style.space(10)
@@ -109,7 +120,10 @@ Column {
             Text {
               textFormat: Text.PlainText
               text: entry.urgent ? "●" : "✓"
-              color: entry.urgent ? Color.urgent : Qt.darker(root.foreground, 1.4)
+              // Accent, not a dimmed foreground: an INFO notice is usually
+              // the all-clear for something, and reading it as greyed-out
+              // filler was half the reason it went unnoticed.
+              color: entry.urgent ? Color.urgent : Color.accent
               font.family: Style.font.family
               font.pixelSize: Style.font.body
             }
@@ -137,13 +151,25 @@ Column {
             leftPadding: Style.space(18)
           }
 
-          Row {
-            spacing: Style.space(8)
-            leftPadding: Style.space(18)
+          // Anchored rather than a Row: the meta line carries the server's
+          // `description`, which can run to a full sentence ("Duration: 1
+          // hour, 38 minutes, 47 seconds. Average speed…"). In a Row that
+          // pushed Archive off the right edge of the panel, out of reach —
+          // rare while only warnings were listed, routine now that
+          // Community Applications' update notices are here too.
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(meta.implicitHeight, archive.implicitHeight)
 
             Text {
+              id: meta
               textFormat: Text.PlainText
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(18)
+              anchors.right: archive.left
+              anchors.rightMargin: Style.space(8)
               anchors.verticalCenter: parent.verticalCenter
+              elide: Text.ElideRight
               text: Model.relativeTime(entry.modelData.timestamp)
                 + (entry.modelData.description !== "" ? " · " + entry.modelData.description : "")
               color: Qt.darker(root.foreground, 1.4)
@@ -152,6 +178,8 @@ Column {
             }
 
             Button {
+              id: archive
+              anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               text: {
                 var p = root.service ? root.service.notificationActionPending : null

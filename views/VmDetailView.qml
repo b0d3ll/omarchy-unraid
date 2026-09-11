@@ -32,6 +32,7 @@ Column {
   readonly property bool _offline: service ? service.offline : false
 
   readonly property string _state: root.domain ? root.domain.state : ""
+  readonly property string _stateLabel: root.domain ? root.domain.stateLabel : ""
   readonly property bool _running: root._state === "RUNNING"
   readonly property bool _paused: root._state === "PAUSED" || root._state === "PMSUSPENDED"
 
@@ -91,7 +92,7 @@ Column {
 
       Text {
         textFormat: Text.PlainText
-        text: root._state
+        text: root._stateLabel
         color: root.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.body

@@ -98,7 +98,10 @@ Panel {
     { key: "docker", label: "Docker" },
     { key: "vms", label: "VMs" },
     { key: "storage", label: "Storage" },
-    { key: "alerts", label: "Alerts" }
+    // Shows every unread notice now, not only the ones that need
+    // attention — the count stays the attention count, which is what the
+    // health dot and the banner key off.
+    { key: "alerts", label: "Notices" }
   ]
 
   // Spec section 5's priority ladder, complete now that the connection

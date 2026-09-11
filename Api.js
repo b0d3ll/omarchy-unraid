@@ -80,8 +80,15 @@ var QUERY_DOCKER = "{ docker { containers { id names state status autoStart isUp
 
 var QUERY_VMS = "{ vms { domains { id name state } } }"
 
+// `list(type: UNREAD)` rather than `warningsAndAlerts`, so INFO notices come
+// through too. Without them the panel showed "Disk-Clear started" as a
+// warning and silently dropped the "Disk-Clear finished (0 errors)" notice
+// that resolved it — the alarm stayed on screen with its own all-clear
+// filtered out. The filter's type/offset/limit are all non-null, and
+// omitting `importance` is what widens it to every level.
 var QUERY_NOTIFICATIONS = "{ notifications { overview { unread { info warning alert total } } "
-  + "warningsAndAlerts { id title subject description importance link timestamp formattedTimestamp } } }"
+  + "list(filter: { type: UNREAD, offset: 0, limit: 50 }) "
+  + "{ id title subject description importance link timestamp formattedTimestamp } } }"
 
 // ------------------------------------------------------- docker operations
 //
@@ -633,41 +640,91 @@ function normalizeDocker(data) {
   }
 }
 
+// VmState is libvirt's own domain-state enum, handed through unchanged, so
+// an off VM reports SHUTOFF. Unraid's VM manager calls that "Stopped", which
+// is the word used here — "Offline" would suggest the VM can't be reached,
+// rather than that it simply isn't running.
+var VM_STATE_LABELS = {
+  NOSTATE: "Unknown",
+  RUNNING: "Running",
+  IDLE: "Idle",
+  PAUSED: "Paused",
+  SHUTDOWN: "Shutting down",
+  SHUTOFF: "Stopped",
+  CRASHED: "Crashed",
+  PMSUSPENDED: "Suspended"
+}
+
+function vmStateLabel(state) {
+  var key = String(state || "")
+  if (key === "") return "Unknown"
+  return VM_STATE_LABELS[key] || key.charAt(0) + key.slice(1).toLowerCase().replace(/_/g, " ")
+}
+
 function normalizeVms(data) {
   var domains = (data && data.vms && data.vms.domains) || []
   return {
     available: !!(data && data.vms && data.vms.domains),
     domains: domains.map(function(d) {
-      return { id: d.id, name: d.name || "unnamed", state: d.state || "UNKNOWN" }
+      var state = d.state || "NOSTATE"
+      return {
+        id: d.id,
+        name: d.name || "unnamed",
+        state: state,
+        stateLabel: vmStateLabel(state)
+      }
     })
   }
+}
+
+function notificationNeedsAttention(item) {
+  return item.importance === "WARNING" || item.importance === "ALERT"
 }
 
 function normalizeNotifications(data) {
   var n = (data && data.notifications) || {}
   var unread = (n.overview && n.overview.unread) || {}
-  var items = n.warningsAndAlerts || []
+  var items = n.list || []
+  // Newest first, defensively — the server already answers in that order,
+  // but both the Notices list and Overview's RECENT slice off the front of
+  // this, so the ordering is load-bearing.
+  var normalized = items.map(normalizeNotification).sort(function(a, b) {
+    return (b.timestamp || 0) - (a.timestamp || 0)
+  })
   return {
+    // Everything unread, INFO included — what the Notices list renders.
+    items: normalized,
+    // The subset that means something is wrong. Desktop notifications and
+    // the tab's count key off this, so a nightly "Docker Auto Update"
+    // notice never raises an alarm or pings the desktop.
+    attention: normalized.filter(notificationNeedsAttention),
     unread: {
       info: num(unread.info, 0),
       warning: num(unread.warning, 0),
       alert: num(unread.alert, 0),
       total: num(unread.total, 0)
-    },
-    items: items.map(function(item) {
-      return {
-        id: item.id,
-        title: item.title || "",
-        subject: item.subject || "",
-        description: item.description || "",
-        importance: item.importance || "INFO",
-        // `link` is relative on a real server ("/Main") — callers prefix
-        // it with the configured base URL.
-        link: item.link || "",
-        timestamp: item.timestamp ? Date.parse(item.timestamp) : null,
-        formattedTimestamp: item.formattedTimestamp || ""
-      }
-    })
+    }
+  }
+}
+
+function normalizeNotification(item) {
+  return {
+    id: item.id,
+    title: item.title || "",
+    subject: item.subject || "",
+    description: item.description || "",
+    importance: item.importance || "INFO",
+    needsAttention: notificationNeedsAttention(item),
+    // `subject` is the event ("Docker Auto Update", "Disk-Clear finished
+    // (0 errors)"); `title` is the component that raised it ("Community
+    // Applications"), which repeats across every notice it sends. Compact
+    // rows that have room for one line want the subject.
+    summary: item.subject || item.title || "",
+    // `link` is relative on a real server ("/Main") — callers prefix
+    // it with the configured base URL.
+    link: item.link || "",
+    timestamp: item.timestamp ? Date.parse(item.timestamp) : null,
+    formattedTimestamp: item.formattedTimestamp || ""
   }
 }
 

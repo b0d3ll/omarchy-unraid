@@ -61,9 +61,13 @@ Item {
   readonly property var vms: Api.normalizeVms(vmsQuery.result)
 
   readonly property var notificationSummary: Api.normalizeNotifications(notificationsQuery.result)
+  // Every unread notice, INFO included — what the Notices list shows.
   readonly property var notifications: notificationSummary.items
-  // The server's own unread counters, rather than counting the returned
-  // list — the list is warnings+alerts only, the counters cover all kinds.
+  // Just the ones that mean something is wrong.
+  readonly property var attentionNotifications: notificationSummary.attention
+  // The server's own unread counters rather than the length of the list
+  // above: this is the "needs attention" count that the tab badge and the
+  // health ladder read, so a routine INFO notice must not inflate it.
   readonly property int unreadNotificationCount:
     notificationSummary.unread.warning + notificationSummary.unread.alert
 
@@ -158,6 +162,9 @@ Item {
   property var _seenNotificationIds: ({})
   property bool _notificationsSeeded: false
 
+  // The seen-set is seeded from every notice, but only warnings and alerts
+  // are ever announced. Now that INFO comes through, announcing the whole
+  // list would ping the desktop for each nightly "Docker Auto Update".
   function _handleNotifications() {
     var items = root.notifications || []
     if (!root._notificationsSeeded) {
@@ -174,7 +181,9 @@ Item {
       var item = items[j]
       if (seen[item.id]) continue
       seen[item.id] = true
-      if (root.desktopNotificationsEnabled) root._sendDesktopNotification(item)
+      if (root.desktopNotificationsEnabled && item.needsAttention) {
+        root._sendDesktopNotification(item)
+      }
     }
     root._seenNotificationIds = seen
   }

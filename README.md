@@ -24,7 +24,8 @@ Tailscale client) and tested individually.
 
 Newly arrived warnings and alerts can raise a desktop notification (off by
 default, under Settings > Behavior); clicking one opens the panel on the
-Alerts tab. Notifications can also be archived from there.
+Notices tab. Notifications can also be archived from there. Only warnings
+and alerts are announced — INFO notices are listed, never pushed.
 
 ## Requirements
 
@@ -59,8 +60,10 @@ Alerts tab. Notifications can also be archived from there.
   shown as "standby" and stays asleep; the section header says how many
   rotating drives are currently spinning. The counters are counted from
   per-disk status rather than read off `vars` — see below.
-- Alerts — click a notification to open it in the Unraid WebUI, or archive
-  it.
+- Notices: every unread notification, filterable by All / Info / Warnings /
+  Critical. Click one to open it in the Unraid WebUI, or archive it. The
+  tab's count stays the warning+alert count, so a nightly "Docker Auto
+  Update" notice is visible without being alarming.
 - Settings: live Unraid/API version and uptime, plus editing the server
   address and replacing the API key.
 - Settings > Connections: the endpoint list with priority order, live
@@ -166,14 +169,39 @@ omarchy plugin enable io.github.b0d3ll.omarchy-unraid
 omarchy restart shell
 ```
 
-## Array state
+## Notifications
 
-`array.state` is the API's own `ArrayState` enum, straight from emhttp's
-`mdState` — "Started" and "Stopped" are the Unraid webGUI's wording for it,
-which is why the panel uses them too. The other nine values are error
+The panel lists every unread notification, not just warnings and alerts.
+It used to query `notifications.warningsAndAlerts`, which meant a notice
+could resolve an alarm without the panel ever saying so: "Disk-Clear
+started" sat on screen as a warning while "Disk-Clear finished (0 errors)"
+was filtered out. `notifications.list(filter: { type: UNREAD, … })` with no
+`importance` returns every level.
+
+What stays keyed to warnings and alerts only: the tab's count, the health
+dot, the Overview banner, and desktop notifications. Listing an INFO notice
+should not make the bar look alarmed or ping the desktop three times a
+week.
+
+Compact rows show a notification's `subject` ("Docker Auto Update",
+"Disk-Clear finished (0 errors)") rather than its `title` ("Community
+Applications"), which is the component that raised it and repeats across
+everything it sends.
+
+## VM and array state
+
+`VmState` is libvirt's own domain-state enum passed through unchanged, so a
+VM that is off reports `SHUTOFF`. Unraid's VM manager calls that "Stopped",
+which is the word the panel uses — "Offline" would suggest the VM can't be
+reached rather than that it simply isn't running. All eight states have
+labels.
+
+`array.state` is likewise the API's `ArrayState` enum, straight from
+emhttp's `mdState` — "Started" and "Stopped" are the Unraid webGUI's own
+wording, which is why the panel keeps them. Its other nine values are error
 states (`TOO_MANY_MISSING_DISKS`, `PARITY_NOT_BIGGEST`, …) that used to
-render raw; they now have readable labels, with an unknown future value
-falling back to a sentence-cased version of itself rather than shouting.
+render raw. Both enums now fall back to a sentence-cased version of an
+unknown future value rather than shouting it.
 
 ## Roadmap
 
