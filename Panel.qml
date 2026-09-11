@@ -234,13 +234,18 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: keyboardPanel.fittedContentWidth(Style.space(440))
-    // Natural height caps at 680px or the available screen height (spec
-    // section 7). During setup/loading there's no header/tabs, so the
-    // full-panel-flow content drives height on its own.
+    // During setup/loading there's no header/tabs, so the full-panel-flow
+    // content drives height on its own.
     readonly property real naturalContentHeight: root.inFullPanelFlow
       ? (fullPanelLoader.item ? fullPanelLoader.item.implicitHeight : Style.space(160))
       : headerArea.height + (viewLoader.item ? viewLoader.item.implicitHeight : 0)
-    contentHeight: keyboardPanel.fittedContentHeight(naturalContentHeight, Style.space(680))
+    // No fixed cap — the screen is the limit. Spec section 7's 680px only
+    // ever bit on the long views (Storage's disk list, Docker's container
+    // list), where it cut the list off at a number that had nothing to do
+    // with how much room the screen actually had. Short views are unaffected
+    // either way: fittedContentHeight takes the smaller of the content's own
+    // height and what fits on screen, so a two-line view stays two lines.
+    contentHeight: keyboardPanel.fittedContentHeight(naturalContentHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -330,6 +335,21 @@ Panel {
                     if (c.latencyMs >= 0) lines.push("Latency: " + c.latencyMs + " ms")
                     return lines.join("\n")
                   }
+                }
+
+                // Was a "Refresh" button down in Overview's quick actions,
+                // which meant the one control that applies to every view
+                // lived inside one of them. The tooltip carries the polling
+                // cadence, since "how fresh is this" is the question that
+                // makes anyone reach for it.
+                PanelActionButton {
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: "󰑐"
+                  tooltipText: "Refresh now\nAuto: every 10–15 s while open, "
+                    + "30–60 s while closed"
+                  foreground: root.barForeground
+                  enabled: root.service.active
+                  onClicked: root.service.refresh()
                 }
 
                 PanelActionButton {

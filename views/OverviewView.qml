@@ -20,6 +20,7 @@ Column {
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
+  readonly property var _system: service ? service.system : ({})
   readonly property var _docker: service ? service.docker : ({})
   readonly property var _vms: service ? service.vms : ({})
   readonly property int _unread: service ? service.unreadNotificationCount : 0
@@ -103,12 +104,17 @@ Column {
       foreground: root.foreground
     }
 
+    // Storage used to sit here as "5.0 / 14.4 TB", which never said which
+    // number was which — it reads equally well as free space. It moved down
+    // to the CPU/RAM group, where the bar underneath settles the question.
+    // Version and uptime take the slot: they answer "which build am I
+    // looking at, and has it rebooted" without a trip to Settings.
     MetricCard {
       width: (parent.width - Style.space(16)) / 2
-      label: "Storage"
-      headline: root.fmt(root._capacity.usedTb) + " / " + root.fmt(root._capacity.totalTb, 1, " TB")
-      subline: root._capacity.usedPercent !== null && root._capacity.usedPercent !== undefined
-        ? Math.round(root._capacity.usedPercent) + "% used"
+      label: "Unraid"
+      headline: root._system.unraidVersion !== "" ? root._system.unraidVersion : "—"
+      subline: root.service && root.service.uptime !== ""
+        ? "Up " + root.service.uptime
         : ""
       foreground: root.foreground
     }
@@ -219,6 +225,46 @@ Column {
         fillColor: Color.accent
       }
     }
+
+    // Same shape as CPU and RAM, which is the point: next to a bar that is
+    // 35% full, "5.0 / 14.4 TB used" can only be read one way.
+    Column {
+      width: parent.width
+      spacing: Style.space(4)
+
+      Item {
+        width: parent.width
+        implicitHeight: storageTitle.implicitHeight
+
+        Text {
+          id: storageTitle
+          textFormat: Text.PlainText
+          anchors.left: parent.left
+          text: "STORAGE"
+          color: Qt.darker(root.foreground, 1.4)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          anchors.right: parent.right
+          text: root._capacity.totalTb
+            ? root.fmt(root._capacity.usedTb) + " / " + root.fmt(root._capacity.totalTb, 1, " TB used")
+            : "—"
+          color: root.foreground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+      }
+
+      ProgressBar {
+        width: parent.width
+        value: root._capacity.usedPercent || 0
+        fillColor: Color.accent
+      }
+    }
   }
 
   // ------------------------------------------------------------- Parity bar
@@ -282,13 +328,6 @@ Column {
         enabled: root.service && Api.hostFromUrl(root.service.connection.endpoint) !== ""
         onClicked: Util.execArgv(["omarchy-launch-terminal", "ssh",
           "root@" + Api.hostFromUrl(root.service.connection.endpoint)])
-      }
-
-      Button {
-        text: "Refresh"
-        bordered: true
-        foreground: root.foreground
-        onClicked: if (root.service) root.service.refresh()
       }
     }
   }

@@ -239,13 +239,21 @@ Item {
   // Recomputed alongside it, because "updated just now" in the header was
   // otherwise frozen at whatever it said when the poll landed.
   property string lastSuccessLabel: "never"
+  // Same trap, and it used to be a binding: `uptime` is the age of a boot
+  // timestamp that never changes, so the binding evaluated once and then
+  // held that answer for the life of the shell. Invisible while it only
+  // appeared in Settings; not once Overview shows it.
+  property string uptime: ""
 
   function _refreshAges() {
     stale = everLoaded && (Date.now() - lastSuccess > 180000)
     lastSuccessLabel = Model.relativeTime(lastSuccess)
+    uptime = Api.uptimeSince(system.bootTime)
   }
 
   onLastSuccessChanged: _refreshAges()
+  // bootTime arrives with the first system poll, which lands between ticks.
+  onSystemChanged: root.uptime = Api.uptimeSince(root.system.bootTime)
 
   Timer {
     interval: 30000
@@ -275,7 +283,6 @@ Item {
     lastSuccess: root.lastSuccess
   })
 
-  readonly property string uptime: Api.uptimeSince(system.bootTime)
 
   // Follows the *active* endpoint: on Tailscale, a notification should
   // open over Tailscale rather than at a LAN address that isn't reachable.

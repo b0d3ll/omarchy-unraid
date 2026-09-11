@@ -39,8 +39,14 @@ Alerts tab. Notifications can also be archived from there.
 - Bar widget: real hostname and a health dot that reflects real state
   (disabled/missing array disks, unread alerts, parity errors, auth
   failure, unreachable).
-- Overview: array state, capacity, CPU/RAM, parity progress, recent
-  notifications, and working WebUI / Terminal / Refresh actions.
+- Overview: array state, Unraid version and uptime, Docker/VM counts, then
+  CPU / RAM / storage as bars, parity progress, recent notifications, and
+  WebUI / Terminal actions. Storage is a bar rather than a tile because
+  "5.0 / 14.4 TB" on its own never said which number was which — next to a
+  bar that is 35% full it can only be read one way.
+- Refresh is the circular arrow next to the gear, so the one control that
+  applies to every view no longer lives inside one of them. Its tooltip
+  carries the polling cadence.
 - Docker: live container list with state, update badges and search, plus a
   per-container detail view with controls and logs.
 - VMs: live list plus a per-VM detail view with start/stop/reboot and,
@@ -63,6 +69,24 @@ Alerts tab. Notifications can also be archived from there.
 Polling slows down while the panel is closed and speeds up while it's
 open; each resource is queried independently, so one unavailable subsystem
 (say Docker) never blanks the rest or reports the server as offline.
+
+| Resource | Panel open | Panel closed |
+| --- | --- | --- |
+| CPU / RAM metrics | 10 s | 60 s |
+| Array, capacity, disks, parity | 15 s | 60 s |
+| Docker containers | 10 s | 60 s |
+| VMs | 10 s | 60 s |
+| Notifications | 15 s | 30 s |
+| Versions, uptime | on connect and on Refresh only | — |
+| Container logs | 5 s while the log view is open | not polled |
+
+Opening the panel, switching to a view, and Refresh each trigger an
+immediate re-poll on top of that.
+
+The panel is as tall as its content, up to what fits on screen. It used to
+stop at 680px, which only ever bit on the long views — Storage's disk list
+and Docker's container list — cutting them off at a height that had
+nothing to do with how much room the screen had.
 
 ## Connection handling
 
