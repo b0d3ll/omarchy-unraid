@@ -26,6 +26,19 @@ Column {
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _disks: service ? service.arrayDisks : null
   readonly property var _lastParity: service ? service.lastParityCheck : null
+  readonly property bool _started: root._array.state === "STARTED"
+  readonly property var _pending: root.service ? root.service.storageActionPending : null
+  readonly property bool _busy: root._pending !== null
+  readonly property bool _controlsUsable: root.service !== null
+    && !root.service.storageControlsForbidden && !root.service.offline
+
+  signal confirmRequested(string message, string confirmText, string kind)
+
+  // "Starting…" on the button that was pressed, so a slow array start is
+  // visibly in progress rather than looking like a dead click.
+  function pendingLabel(kind, label) {
+    return (root._pending && root._pending.kind === kind) ? label + "…" : label
+  }
   readonly property bool _historyAvailable:
     root.service !== null && root.service.parityHistory.available
 
@@ -71,6 +84,36 @@ Column {
       color: root.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.body
+    }
+  }
+
+  Row {
+    spacing: Style.space(8)
+    visible: root._controlsUsable && root._array.state !== ""
+
+    // Stopping the array unmounts every share and takes Docker and the VMs
+    // down with it, so it says that rather than asking "are you sure".
+    // Starting is not destructive and goes straight through.
+    Button {
+      visible: root._started
+      text: root.pendingLabel("arrayStop", "Stop array")
+      bordered: true
+      foreground: Color.urgent
+      enabled: !root._busy
+      onClicked: root.confirmRequested(
+        "Stop the array?\n\nEvery share is unmounted, and all Docker containers "
+          + "and VMs stop with it. Anything writing to the array right now will "
+          + "be interrupted.",
+        "Stop array", "arrayStop")
+    }
+
+    Button {
+      visible: !root._started
+      text: root.pendingLabel("arrayStart", "Start array")
+      bordered: true
+      foreground: root.foreground
+      enabled: !root._busy
+      onClicked: root.service.storageAction("arrayStart")
     }
   }
 
@@ -198,6 +241,87 @@ Column {
         ? Color.urgent : Qt.darker(root.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
+    }
+
+    Item { width: 1; height: Style.space(2) }
+
+    Row {
+      spacing: Style.space(8)
+      visible: root._controlsUsable && root._started
+
+      // A check reads every disk end to end for hours, which spins up the
+      // whole array — the one thing this plugin otherwise works hard to
+      // avoid — so the confirmation says so plainly.
+      Button {
+        visible: !root._parity.running && !root._parity.paused
+        text: root.pendingLabel("parityCheck", "Check")
+        bordered: true
+        foreground: root.foreground
+        enabled: !root._busy
+        onClicked: root.confirmRequested(
+          "Start a parity check?\n\nThis reads every disk end to end, so all of "
+            + "them spin up and stay up for hours. It reports errors without "
+            + "changing anything.",
+          "Start check", "parityCheck")
+      }
+
+      // Distinct from the read-only check on purpose: this rewrites parity
+      // from the data disks, which is the wrong move if a data disk is the
+      // one that is wrong.
+      Button {
+        visible: !root._parity.running && !root._parity.paused
+        text: root.pendingLabel("parityCorrect", "Check & correct")
+        bordered: true
+        foreground: Color.urgent
+        enabled: !root._busy
+        onClicked: root.confirmRequested(
+          "Start a correcting parity check?\n\nSame as a check, but it rewrites "
+            + "parity wherever it disagrees with the data disks. If a data disk "
+            + "is the one at fault, this writes the fault into parity.",
+          "Start correcting", "parityCorrect")
+      }
+
+      Button {
+        visible: root._parity.running
+        text: root.pendingLabel("parityPause", "Pause")
+        bordered: true
+        foreground: root.foreground
+        enabled: !root._busy
+        onClicked: root.service.storageAction("parityPause")
+      }
+
+      Button {
+        visible: root._parity.paused
+        text: root.pendingLabel("parityResume", "Resume")
+        bordered: true
+        foreground: root.foreground
+        enabled: !root._busy
+        onClicked: root.service.storageAction("parityResume")
+      }
+
+      Button {
+        visible: root._parity.running || root._parity.paused
+        text: root.pendingLabel("parityCancel", "Cancel")
+        bordered: true
+        foreground: Color.urgent
+        enabled: !root._busy
+        onClicked: root.confirmRequested(
+          "Cancel the parity check?\n\nProgress is lost — the next check starts "
+            + "from the beginning.",
+          "Cancel check", "parityCancel")
+      }
+    }
+
+    Text {
+      textFormat: Text.PlainText
+      width: parent.width
+      wrapMode: Text.WordWrap
+      visible: root.service !== null && root.service.storageControlsForbidden
+      text: "This API key can read the array but not control it. Grant it array "
+        + "update permission in Unraid → Settings → Management Access → API Keys."
+      color: Qt.darker(root.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
     }
   }
 

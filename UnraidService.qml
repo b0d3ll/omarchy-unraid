@@ -20,6 +20,8 @@ Item {
   property var secretStore: null
   property var connectionManager: null
   property bool panelOpen: false
+  readonly property bool allowSelfSigned:
+    configStore ? configStore.allowSelfSigned : false
 
   // The one seam the connection manager slots into: which URL is current.
   //
@@ -101,6 +103,9 @@ Item {
     (actionPending && actionPending.scope === "docker") ? actionPending : null
   readonly property var vmActionPending:
     (actionPending && actionPending.scope === "vm") ? actionPending : null
+  readonly property var storageActionPending:
+    (actionPending && (actionPending.scope === "array" || actionPending.scope === "parity"))
+      ? actionPending : null
 
   // Latched once the server refuses a control: a read-only key won't start
   // working mid-session, so there's no point leaving the buttons armed
@@ -108,9 +113,13 @@ Item {
   // be allowed to control one and not the other.
   property bool dockerControlsForbidden: false
   property bool vmControlsForbidden: false
+  // Array and parity are one permission in practice — an API key granted
+  // array update gets both — so one latch covers them.
+  property bool storageControlsForbidden: false
 
   signal dockerActionFinished(string name, string kind, bool ok, string message)
   signal vmActionFinished(string name, string kind, bool ok, string message)
+  signal storageActionFinished(string kind, bool ok, string message)
 
   function dockerAction(kind, container) {
     if (!container || actionPending || dockerControlsForbidden) return
@@ -135,6 +144,28 @@ Item {
       : ""
     if (query === "") return
     actionPending = { scope: "vm", id: domain.id, kind: kind, name: domain.name }
+    actionRequest.send(query)
+  }
+
+  // Array start/stop and the four parity-check controls. Same shape as the
+  // Docker and VM actions: lock, mutate, re-read, report. Both re-poll the
+  // array afterwards, since that is where their result becomes visible.
+  function storageAction(kind) {
+    if (actionPending || storageControlsForbidden) return
+    var query = kind === "arrayStart" ? Api.mutationArraySetState("START")
+      : kind === "arrayStop" ? Api.mutationArraySetState("STOP")
+      : kind === "parityCheck" ? Api.mutationParityStart(false)
+      : kind === "parityCorrect" ? Api.mutationParityStart(true)
+      : kind === "parityPause" ? Api.mutationParityPause()
+      : kind === "parityResume" ? Api.mutationParityResume()
+      : kind === "parityCancel" ? Api.mutationParityCancel()
+      : ""
+    if (query === "") return
+    actionPending = {
+      scope: kind.indexOf("array") === 0 ? "array" : "parity",
+      kind: kind,
+      name: kind.indexOf("array") === 0 ? "Array" : "Parity check"
+    }
     actionRequest.send(query)
   }
 
@@ -437,6 +468,7 @@ Item {
     id: accessUrlsRequest
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
 
     onSucceeded: function(data, errors) {
       var existing = []
@@ -474,6 +506,7 @@ Item {
     id: archiveRequest
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
 
     onSucceeded: function(data, errors) {
       var pending = root.notificationActionPending || ({})
@@ -498,6 +531,7 @@ Item {
     id: actionRequest
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
 
     onSucceeded: function(data, errors) {
       var pending = root.actionPending || ({})
@@ -513,6 +547,10 @@ Item {
       if (pending.scope === "vm") {
         vmsQuery.refresh()
         root.vmActionFinished(pending.name || "VM", pending.kind || "", true, "")
+      } else if (pending.scope === "array" || pending.scope === "parity") {
+        arrayQuery.refresh()
+        parityHistoryQuery.refresh()
+        root.storageActionFinished(pending.kind || "", true, "")
       } else {
         dockerQuery.refresh()
         root.dockerActionFinished(pending.name || "Container", pending.kind || "", true, "")
@@ -527,16 +565,21 @@ Item {
   }
 
   function _reportActionFailure(pending, message, code) {
-    var isVm = pending.scope === "vm"
-    var subject = pending.name || (isVm ? "VM" : "Container")
+    var scope = pending.scope || "docker"
+    var isStorage = scope === "array" || scope === "parity"
+    var subject = pending.name || (scope === "vm" ? "VM" : "Container")
     var forbidden = /forbidden|not allowed|permission/i.test(message || "")
       || code === "FORBIDDEN"
 
     if (forbidden) {
-      if (isVm) {
+      if (scope === "vm") {
         root.vmControlsForbidden = true
         root.vmActionFinished(subject, pending.kind || "", false,
           "The API key isn't allowed to control VMs.")
+      } else if (isStorage) {
+        root.storageControlsForbidden = true
+        root.storageActionFinished(pending.kind || "", false,
+          "The API key isn't allowed to control the array.")
       } else {
         root.dockerControlsForbidden = true
         root.dockerActionFinished(subject, pending.kind || "", false,
@@ -545,7 +588,8 @@ Item {
       return
     }
 
-    if (isVm) root.vmActionFinished(subject, pending.kind || "", false, message)
+    if (scope === "vm") root.vmActionFinished(subject, pending.kind || "", false, message)
+    else if (isStorage) root.storageActionFinished(pending.kind || "", false, message)
     else root.dockerActionFinished(subject, pending.kind || "", false, message)
   }
 
@@ -554,6 +598,7 @@ Item {
     queryString: root.logsContainerId !== "" ? Api.queryDockerLogs(root.logsContainerId, 100) : ""
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     // Only alive while the logs view has a container selected.
     active: root.active && root.logsContainerId !== ""
     panelOpen: root.panelOpen
@@ -568,6 +613,7 @@ Item {
     queryString: Api.QUERY_SYSTEM
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
   }
@@ -586,6 +632,7 @@ Item {
     queryString: Api.QUERY_METRICS
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
     intervalOpen: 10000
@@ -602,6 +649,7 @@ Item {
     queryString: Api.QUERY_ARRAY
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
     intervalOpen: 15000
@@ -618,6 +666,7 @@ Item {
     queryString: Api.QUERY_PARITY_HISTORY
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
     intervalOpen: 300000
@@ -629,6 +678,7 @@ Item {
     queryString: Api.QUERY_DOCKER
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
     intervalOpen: 10000
@@ -640,6 +690,7 @@ Item {
     queryString: Api.QUERY_VMS
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
     intervalOpen: 10000
@@ -652,6 +703,7 @@ Item {
     queryString: Api.QUERY_NOTIFICATIONS
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     active: root.active
     panelOpen: root.panelOpen
     intervalOpen: 15000

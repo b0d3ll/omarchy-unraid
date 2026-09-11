@@ -22,6 +22,7 @@ Column {
   // Set to reuse the key already in the keyring; leave empty to test a
   // key passed straight into run().
   property var secretStore: null
+  property bool allowSelfSigned: false
 
   signal succeeded(string hostname, string version)
   signal failed(string reason, string message)
@@ -39,6 +40,7 @@ Column {
   Plugin.GraphQlRequest {
     id: request
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
 
     onSucceeded: function(data, errors) {
       var vars = data && data.vars ? data.vars : null

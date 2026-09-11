@@ -72,6 +72,52 @@ Panel {
     return activeView === key
   }
 
+  // ------------------------------------------------------------- keyboard
+  //
+  // Omarchy is keyboard-driven, so the panel is too. Everything here rides
+  // on the shared PanelKeyCatcher rather than a private Keys.onPressed: it
+  // already maps the arrow keys and hjkl to moveRequested, so vim keys come
+  // along without asking for them.
+
+  // Which tab the current view belongs to, subviews included.
+  function activeTabIndex() {
+    for (var i = 0; i < _tabs.length; i++) if (tabIsActive(_tabs[i].key)) return i
+    return -1
+  }
+
+  // Typing into the search box or an address field must not be read as tab
+  // shortcuts, and a raised confirmation owns the keyboard until answered.
+  readonly property bool keyboardShortcutsActive:
+    !inFullPanelFlow && !confirmDialog.opened
+
+  function selectTab(index) {
+    if (!keyboardShortcutsActive) return
+    if (index < 0 || index >= _tabs.length) return
+    activeView = _tabs[index].key
+  }
+
+  function switchTabBy(delta) {
+    if (!keyboardShortcutsActive) return
+    // From a subview, wrap from that subview's own tab rather than from
+    // wherever the list happens to start.
+    var current = activeTabIndex()
+    if (current < 0) current = 0
+    selectTab((current + delta + _tabs.length) % _tabs.length)
+  }
+
+  // Escape backs out one level before it closes the panel. Closing outright
+  // from a container's log view meant reopening and clicking back down two
+  // levels to get where you were.
+  function escapePressed() {
+    switch (activeView) {
+      case "dockerLogs": activeView = "dockerDetail"; return
+      case "dockerDetail": activeView = "docker"; return
+      case "vmDetail": activeView = "vms"; return
+      case "settings": activeView = "overview"; return
+      default: root.close()
+    }
+  }
+
   // Decided once, the first time both stores finish their async startup
   // read (FileView load, secret-tool presence check) — not a live
   // `isConfigured ? ... : ...` binding, because that would yank the user
@@ -254,8 +300,17 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: root.close()
+      onCloseRequested: root.escapePressed()
+      // Tab/Shift-Tab stays Omarchy's "move between bar panels"; it is not
+      // ours to repurpose for our own tab row.
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      onMoveRequested: function(dx, dy) {
+        if (dx !== 0) root.switchTabBy(dx > 0 ? 1 : -1)
+      }
+      onTextKey: function(t) {
+        if (t >= "1" && t <= "5") root.selectTab(parseInt(t, 10) - 1)
+        else if (t === "r" || t === "R") { if (root.keyboardShortcutsActive) root.service.refresh() }
+      }
 
       // ---------------------------------------------------- loading/setup
       ScrollView {
@@ -453,6 +508,19 @@ Panel {
     }
   }
 
+  function storageActionPastTense(kind) {
+    switch (kind) {
+      case "arrayStart": return "Array started"
+      case "arrayStop": return "Array stopped"
+      case "parityCheck": return "Parity check started"
+      case "parityCorrect": return "Correcting parity check started"
+      case "parityPause": return "Parity check paused"
+      case "parityResume": return "Parity check resumed"
+      case "parityCancel": return "Parity check cancelled"
+      default: return "Array updated"
+    }
+  }
+
   // Past tense per action, rather than a chain ending in a catch-all: the
   // catch-all meant a new action reported itself as "force stopped", and the
   // failure branch built its verb as kind + "ed" — "reseted", "forceStoped".
@@ -485,6 +553,14 @@ Panel {
     function onNotificationArchived(title, ok, message) {
       toast.show(ok ? "Archived: " + title
         : (message !== "" ? message : "Could not archive " + title))
+    }
+
+    function onStorageActionFinished(kind, ok, message) {
+      if (ok) {
+        toast.show(root.storageActionPastTense(kind))
+      } else {
+        toast.show(message !== "" ? message : "That array action did not go through")
+      }
     }
 
     function onVmActionFinished(name, kind, ok, message) {
@@ -599,6 +675,11 @@ Panel {
     StorageView {
       service: root.service
       foreground: root.barForeground
+      onConfirmRequested: function(message, confirmText, kind) {
+        root.askConfirm(message, confirmText, function() {
+          root.service.storageAction(kind)
+        })
+      }
     }
   }
 

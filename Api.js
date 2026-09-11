@@ -134,6 +134,43 @@ function mutationArchiveAll(importance) {
   return "mutation { archiveAll" + arg + " { unread { info warning alert total } } }"
 }
 
+// ------------------------------------------------- array/parity operations
+//
+// parityCheck's four mutations return the `JSON` scalar, so they take no
+// selection set — `{ parityCheck { pause } }` is the whole document. Verified
+// against the live schema rather than assumed: a selection set on a scalar
+// is a validation error, not something the server tolerates.
+//
+// `start` takes a required Boolean. false is a read-only check that reports
+// what it found; true writes corrections back to parity as it goes. Two
+// separate callers rather than a shared one with a flag, because "check" and
+// "check and rewrite parity" are not the same decision.
+
+function mutationParityStart(correcting) {
+  return "mutation { parityCheck { start(correct: " + (correcting === true) + ") } }"
+}
+
+function mutationParityPause() { return "mutation { parityCheck { pause } }" }
+function mutationParityResume() { return "mutation { parityCheck { resume } }" }
+function mutationParityCancel() { return "mutation { parityCheck { cancel } }" }
+
+var ARRAY_DESIRED_STATE = { START: true, STOP: true }
+
+// `desiredState` is an enum and so cannot be quoted — same whitelist as
+// mutationArchiveAll, for the same reason. An unrecognised value yields an
+// empty document that the caller refuses to send rather than something
+// half-built.
+//
+// The reply is read only for its error status; the array's real state comes
+// from the next poll (spec section 45). Encryption is out of scope for v0.2:
+// ArrayStateInput also takes decryptionPassword/decryptionKeyfile, and a
+// server with an encrypted array will refuse START without them and say so.
+function mutationArraySetState(desiredState) {
+  var key = String(desiredState || "")
+  if (!ARRAY_DESIRED_STATE[key]) return ""
+  return "mutation { array { setState(input: { desiredState: " + key + " }) { state } } }"
+}
+
 // ------------------------------------------------------ endpoint discovery
 //
 // What the server itself advertises (spec section 29 step 3). On a real

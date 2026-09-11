@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.2.0.** Onboarding saves a real server URL and
+**Status: v0.3.0.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -68,8 +68,13 @@ and alerts are announced — INFO notices are listed, never pushed.
   "Archive all" clears whatever the active filter shows, behind a
   confirmation — it maps onto `archiveAll(importance)`, whose argument is
   nullable, so the All filter simply omits it.
+- Storage also controls the array: start/stop, and parity check start,
+  pause, resume and cancel. A read-only check and a correcting one are
+  separate buttons, because rewriting parity from the data disks is not the
+  same decision as reading them.
 - Settings: live Unraid/API version and uptime, plus editing the server
-  address and replacing the API key.
+  address, replacing the API key, and allowing a self-signed HTTPS
+  certificate.
 - Settings > Connections: the endpoint list with priority order, live
   endpoint and latency, per-endpoint reachability test, and endpoint
   auto-detection.
@@ -96,6 +101,51 @@ The panel is as tall as its content, up to what fits on screen. It used to
 stop at 680px, which only ever bit on the long views — Storage's disk list
 and Docker's container list — cutting them off at a height that had
 nothing to do with how much room the screen had.
+
+## Keyboard
+
+Omarchy is keyboard-driven, so the panel is too. Everything rides on the
+shared `PanelKeyCatcher`, which already maps the arrow keys and `hjkl`, so
+vim keys work without asking for them.
+
+| Key | Action |
+| --- | --- |
+| `1`–`5` | jump to a tab |
+| `←` / `→`, `h` / `l` | cycle tabs, wrapping |
+| `r` | refresh everything |
+| `Esc` | back out one level, or close |
+
+`Esc` leaves a detail view for its list before it closes the panel —
+closing outright from a container's log view meant reopening and clicking
+back down two levels. `Tab` stays Omarchy's own "move between bar panels";
+it is not ours to repurpose.
+
+Shortcuts are inert while a confirmation is up, and while onboarding owns
+the panel.
+
+## HTTPS
+
+An address is used exactly as typed — `https://tower.local` stays HTTPS.
+A bare host still defaults to `http://`, which is how Unraid ships.
+
+Unraid's HTTPS listener normally presents a self-signed certificate, which
+curl rejects, and the panel used to report that as a flat "could not reach
+the server" — the opposite of what happened. A certificate failure now says
+so and points at the switch, and **Settings > Server > Allow self-signed
+certificate** (also offered during onboarding, for an `https://` address)
+turns on curl's `insecure` for that endpoint. It applies only to HTTPS
+endpoints: setting it on a plain HTTP request is meaningless, and leaving
+it permanently on would weaken a properly-certificated server too.
+
+The failure *reason* stays `unreachable` internally even for a certificate
+error. That string is the connection layer's vocabulary — `ConnectionManager`
+only counts `unreachable` toward failover — so a separate `tls` reason would
+have quietly stopped a certificate-broken endpoint from ever failing over to
+a working one.
+
+Replies are capped with `curl --max-filesize`. A reply is a GraphQL
+document, never a payload; the largest legitimate one here is the parity log
+at ~8.5 KB.
 
 ## Connection handling
 

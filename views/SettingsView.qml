@@ -22,6 +22,9 @@ Column {
   property var secretStore: null
   property color foreground: Color.foreground
 
+  readonly property bool allowSelfSigned:
+    root.configStore ? root.configStore.allowSelfSigned : false
+
   property bool editingServer: false
   property string editServerInput: ""
   property bool editingKey: false
@@ -109,6 +112,7 @@ Column {
   Plugin.GraphQlRequest {
     id: endpointProbe
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     timeoutSeconds: 4
 
     property string probeId: ""
@@ -200,6 +204,30 @@ Column {
   Column {
     width: parent.width
     spacing: Style.space(6)
+
+    Row {
+      spacing: Style.space(8)
+      // Only an https endpoint can have a certificate to distrust.
+      visible: /^https:/i.test(root.configStore ? root.configStore.serverUrl : "")
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: "Allow self-signed certificate"
+        color: Qt.darker(root.foreground, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Button {
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.allowSelfSigned ? "On" : "Off"
+        bordered: true
+        selected: root.allowSelfSigned
+        foreground: root.foreground
+        onClicked: root.configStore.save({ allowSelfSigned: !root.allowSelfSigned })
+      }
+    }
 
     PanelSectionHeader { text: "CONNECTIONS"; foreground: root.foreground }
 
@@ -553,6 +581,7 @@ Column {
     ConnectionTest {
       id: testWidget
       width: parent.width
+      allowSelfSigned: root.allowSelfSigned
     }
   }
 

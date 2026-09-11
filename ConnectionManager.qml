@@ -20,6 +20,8 @@ Item {
 
   property var configStore: null
   property var secretStore: null
+  readonly property bool allowSelfSigned:
+    configStore ? configStore.allowSelfSigned : false
   property bool panelOpen: false
 
   readonly property var endpoints: configStore ? (configStore.endpoints || []) : []
@@ -186,6 +188,7 @@ Item {
   GraphQlRequest {
     id: probe
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     timeoutSeconds: 2
 
     property string probeId: ""
@@ -207,6 +210,7 @@ Item {
   GraphQlRequest {
     id: promotionProbe
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
     timeoutSeconds: 2
 
     property string probeId: ""

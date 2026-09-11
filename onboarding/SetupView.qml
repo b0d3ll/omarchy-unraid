@@ -26,6 +26,11 @@ Column {
   property string addressInput: "http://tower.local"
   property string keyInput: ""
   property string pendingBaseUrl: ""
+  // Local until the config is written on Finish — there is nothing to read
+  // it back from yet. Only meaningful for an https address, so the control
+  // only appears for one.
+  property bool allowSelfSigned: false
+  readonly property bool _httpsPending: /^https:/i.test(root.pendingBaseUrl)
   property string pendingGraphqlUrl: ""
   property bool saving: false
   property string saveError: ""
@@ -76,7 +81,8 @@ Column {
         serverUrl: root.pendingBaseUrl,
         graphqlUrl: root.pendingGraphqlUrl,
         hostname: connectionTest.resultHostname,
-        unraidVersion: connectionTest.resultVersion
+        unraidVersion: connectionTest.resultVersion,
+        allowSelfSigned: root.allowSelfSigned
       })
       root.step = 3
     })
@@ -199,9 +205,39 @@ Column {
       }
     }
 
+    // Offered rather than pre-checked: Unraid's HTTPS listener almost always
+    // carries a self-signed certificate, but trusting one is the user's call
+    // to make, not a default to inherit.
+    Row {
+      spacing: Style.space(8)
+      visible: root._httpsPending
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        textFormat: Text.PlainText
+        text: "Allow self-signed certificate"
+        color: Qt.darker(root.foreground, 1.4)
+        font.family: Style.font.family
+        font.pixelSize: Style.font.bodySmall
+      }
+
+      Button {
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.allowSelfSigned ? "On" : "Off"
+        bordered: true
+        selected: root.allowSelfSigned
+        foreground: root.foreground
+        onClicked: {
+          root.allowSelfSigned = !root.allowSelfSigned
+          connectionTest.testState = "idle"
+        }
+      }
+    }
+
     ConnectionTest {
       id: connectionTest
       width: parent.width
+      allowSelfSigned: root.allowSelfSigned
     }
   }
 

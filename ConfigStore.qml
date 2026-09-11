@@ -43,6 +43,10 @@ Item {
   // desktop notifications. Off by default — a plugin that starts pushing
   // notifications uninvited is a plugin people turn off.
   property bool desktopNotifications: false
+  // Unraid's HTTPS listener normally carries a self-signed certificate, so
+  // reaching it at all needs an explicit decision to trust it. Off by
+  // default, and it only affects https endpoints.
+  property bool allowSelfSigned: false
 
   function applyJson(text) {
     var data = {}
@@ -53,6 +57,7 @@ Item {
     root.unraidVersion = typeof data.unraidVersion === "string" ? data.unraidVersion : ""
     root.endpoints = root._migrateEndpoints(data)
     root.desktopNotifications = data.desktopNotifications === true
+    root.allowSelfSigned = data.allowSelfSigned === true
     root.loaded = true
   }
 
@@ -108,7 +113,9 @@ Item {
       unraidVersion: fields.unraidVersion !== undefined ? fields.unraidVersion : root.unraidVersion,
       endpoints: fields.endpoints !== undefined ? fields.endpoints : root.endpoints,
       desktopNotifications: fields.desktopNotifications !== undefined
-        ? fields.desktopNotifications : root.desktopNotifications
+        ? fields.desktopNotifications : root.desktopNotifications,
+      allowSelfSigned: fields.allowSelfSigned !== undefined
+        ? fields.allowSelfSigned : root.allowSelfSigned
     }
     applyJson(JSON.stringify(data))
     // mkdir must finish before the write lands, or a truly fresh install

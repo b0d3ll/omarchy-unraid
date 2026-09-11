@@ -16,6 +16,7 @@ Item {
   property string queryString: ""
   property string endpoint: ""
   property var secretStore: null
+  property bool allowSelfSigned: false
 
   // 0 disables timed polling (used for rarely-changing data like versions,
   // which is fetched on connect and on manual refresh only).
@@ -61,6 +62,7 @@ Item {
     id: request
     endpoint: root.endpoint
     secretStore: root.secretStore
+    allowSelfSigned: root.allowSelfSigned
 
     onSucceeded: function(data, errors) {
       root.loading = false

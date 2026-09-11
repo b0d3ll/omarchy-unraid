@@ -101,11 +101,24 @@ Item {
     return base
   }
 
+  // Unraid's HTTPS listener normally presents a self-signed certificate, so
+  // curl rejects it and the panel reported a flat "could not reach the
+  // server" — which is exactly the wrong diagnosis. Opting in adds curl's
+  // `insecure`, and only ever for an https endpoint: setting it on a plain
+  // http request would be meaningless, and leaving it permanently on would
+  // silently weaken a properly-certificated server too.
+  property bool allowSelfSigned: false
+  // The biggest reply the plugin legitimately receives is the parity log at
+  // ~8.5 KB; 4 MB is far past anything real and far below hurting.
+  property int maxResponseBytes: 4194304
+  readonly property bool _isHttps: /^https:/i.test(root.endpoint)
+
   function _start(key) {
     proc.environment = root.sessionEnv({
       "OMARCHY_UNRAID_CURL_CONFIG":
         'header = "x-api-key: ' + root.curlConfigValue(key) + '"\n'
-        + 'header = "Content-Type: application/json"\n',
+        + 'header = "Content-Type: application/json"\n'
+        + ((root.allowSelfSigned && root._isHttps) ? 'insecure\n' : ''),
       "OMARCHY_UNRAID_QUERY": JSON.stringify({ query: root._pendingQuery }),
       "OMARCHY_UNRAID_URL": root.endpoint
     })
@@ -119,6 +132,10 @@ Item {
       // auth rejection). Errors are read out of the JSON instead, and a
       // genuine connection failure still shows up as a curl exit code.
       + ' && curl -sS --max-time ' + Math.max(1, root.timeoutSeconds)
+      // A reply is a GraphQL document, never a payload. Without a ceiling a
+      // wrong URL pointing at something large — or a hostile answer — gets
+      // read into memory in full before anything looks at it.
+      + ' --max-filesize ' + root.maxResponseBytes
       + ' -K "$CFGFILE" -X POST'
       + ' --data "$OMARCHY_UNRAID_QUERY" "$OMARCHY_UNRAID_URL"']
     proc.running = true
@@ -165,6 +182,21 @@ Item {
       var exitCode = proc.lastExitCode
       if (exitCode !== 0 && exitCode !== 22) {
         var stderrText = proc.lastStderr.trim()
+        // curl's TLS family: 35 connect, 51/60 verification, 58/83 client
+        // cert, 77 CA store. The message is specific because this is the one
+        // failure the user can fix from Settings — but the *reason* stays
+        // "unreachable" on purpose. That string is the connection layer's
+        // vocabulary: ConnectionManager only counts "unreachable" toward
+        // failover, and UnraidService judges offline on it, so inventing a
+        // "tls" reason would quietly stop a certificate-broken endpoint from
+        // ever failing over to a working one.
+        if (root._isHttps && [35, 51, 58, 60, 77, 83].indexOf(exitCode) >= 0) {
+          root.failed("unreachable", "The server's HTTPS certificate was rejected. "
+            + "Unraid usually presents a self-signed one — allow it under "
+            + "Settings > Server, or use an http:// address."
+            + (stderrText !== "" ? " (" + stderrText + ")" : ""))
+          return
+        }
         root.failed("unreachable", "Could not reach the server at that address."
           + (stderrText !== "" ? " (" + stderrText + ")" : " (curl exit " + exitCode + ")"))
         return
