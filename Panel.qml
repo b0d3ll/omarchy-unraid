@@ -127,7 +127,9 @@ Panel {
     // hidden, only de-escalated.
     if ((array.missing || 0) > 0) return "CRITICAL"
     if (service.notificationSummary.unread.alert > 0) return "CRITICAL"
-    if ((parity.errors || 0) > 0) return "WARNING"
+    // From the parity log, not from parityCheckStatus — that one never
+    // carries an error count, so this rung of the ladder could never fire.
+    if (service.lastParityCheck && service.lastParityCheck.errors > 0) return "WARNING"
     if (service.notificationSummary.unread.warning > 0) return "WARNING"
     if ((array.disabled || 0) > 0 || (array.invalid || 0) > 0) return "NOTICE"
     if (parity.running || (array.state !== "" && array.state !== "STARTED")) return "NOTICE"
@@ -150,7 +152,9 @@ Panel {
         if ((array.disabled || 0) > 0) return "Array disk disabled"
         if ((array.invalid || 0) > 0) return "Array disk rebuilding"
         if (parity.running) return "Parity check running"
-        if (array.state !== "" && array.state !== "STARTED") return "Array " + array.state.toLowerCase()
+        // Colon, not a space: the labels are phrases, not adjectives, so
+        // "Array too many missing disks" needed the separator to read.
+        if (array.state !== "" && array.state !== "STARTED") return "Array: " + array.stateLabel.toLowerCase()
         return "Notice"
       case "CONNECTING": return "Connecting…"
       default: return "Healthy"

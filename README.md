@@ -39,7 +39,8 @@ Alerts tab. Notifications can also be archived from there.
 - Bar widget: real hostname and a health dot that reflects real state
   (disabled/missing array disks, unread alerts, parity errors, auth
   failure, unreachable).
-- Overview: array state, Unraid version and uptime, Docker/VM counts, then
+- Overview: array state with its last parity check, Unraid version and
+  uptime, Docker/VM counts, then
   CPU / RAM / storage as bars, parity progress, recent notifications, and
   WebUI / Terminal actions. Storage is a bar rather than a tile because
   "5.0 / 14.4 TB" on its own never said which number was which — next to a
@@ -77,6 +78,7 @@ open; each resource is queried independently, so one unavailable subsystem
 | Docker containers | 10 s | 60 s |
 | VMs | 10 s | 60 s |
 | Notifications | 15 s | 30 s |
+| Parity history | 5 min | 15 min |
 | Versions, uptime | on connect and on Refresh only | — |
 | Container logs | 5 s while the log view is open | not polled |
 
@@ -164,12 +166,42 @@ omarchy plugin enable io.github.b0d3ll.omarchy-unraid
 omarchy restart shell
 ```
 
+## Array state
+
+`array.state` is the API's own `ArrayState` enum, straight from emhttp's
+`mdState` — "Started" and "Stopped" are the Unraid webGUI's wording for it,
+which is why the panel uses them too. The other nine values are error
+states (`TOO_MANY_MISSING_DISKS`, `PARITY_NOT_BIGGEST`, …) that used to
+render raw; they now have readable labels, with an unknown future value
+falling back to a sentence-cased version of itself rather than shouting.
+
 ## Roadmap
 
 Every milestone in the v0.1 spec is now implemented. Deliberately out of
 scope for v0.1:
 multiple servers, container updates/installs, share management, SMART
 monitoring, and Unraid Connect as a transport.
+
+## Parity reporting
+
+`array.parityCheckStatus` declares `running`, `paused`, `correcting` and
+`errors`, but the API never assigns any of them: `getParityCheckStatus`
+(`api/src/core/modules/array/parity-check-status.ts`) returns only
+`status`, `speed`, `date`, `duration` and `progress`, so the other four are
+always null. Reading them as booleans meant `running` was permanently
+false and the parity progress bar was dead code that could not appear
+during a real check; `errors` was worse, because `num(errors, 0)` turned a
+null into a confident `0` and printed "Errors: 0" whether or not the last
+check had found any.
+
+Running and paused are now derived from `status`, which does carry
+`RUNNING` and `PAUSED`. Real error counts come from `parityHistory`, which
+parses the parity log — that is also where "last check" comes from. Note
+that `parityCheckStatus.date` is when a check *started* while
+`parityHistory[].date` is when it *finished*; they differ by `duration`.
+
+A running check reports no error count anywhere, so the progress view
+shows percentage and speed and says nothing about errors.
 
 ## Disk counters
 

@@ -3,6 +3,8 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 import "../components"
+import "../Api.js" as Api
+import "../Model.js" as Model
 
 // Array/capacity/parity summary plus the per-disk list (spec sections
 // 25-26).
@@ -23,6 +25,15 @@ Column {
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _disks: service ? service.arrayDisks : null
+  readonly property var _lastParity: service ? service.lastParityCheck : null
+  readonly property bool _historyAvailable:
+    root.service !== null && root.service.parityHistory.available
+
+  readonly property string _paritySpeed: {
+    var raw = String(root._parity.speed || "").trim()
+    if (raw === "" || raw === "0") return ""
+    return /[a-z]/i.test(raw) ? raw : raw + " MB/s"
+  }
 
   function fmt(value, digits, suffix) {
     if (value === null || value === undefined || isNaN(value)) return "—"
@@ -56,7 +67,7 @@ Column {
     }
     Text {
       textFormat: Text.PlainText
-      text: root._array.state === "STARTED" ? "Started" : (root._array.state || "—")
+      text: root._array.stateLabel || "—"
       color: root.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.body
@@ -152,18 +163,39 @@ Column {
 
     Text {
       textFormat: Text.PlainText
-      text: root._parity.running
-        ? "Running · " + (root._parity.progress || 0) + "% · " + (root._parity.speed || "—")
-        : (root._parity.status ? "Last check: " + root._parity.status : "No check running")
+      text: {
+        if (root._parity.running) {
+          return "Running · " + Math.round(root._parity.progress || 0) + "%"
+            + (root._paritySpeed !== "" ? " · " + root._paritySpeed : "")
+        }
+        if (root._parity.paused) return "Paused · " + Math.round(root._parity.progress || 0) + "%"
+        if (root._lastParity) {
+          var line = "Last check: " + Model.relativeTime(root._lastParity.finishedAt)
+          var took = Api.formatDuration(root._lastParity.durationSeconds)
+          if (root._lastParity.status !== "COMPLETED") {
+            line += " · " + root._lastParity.status.toLowerCase()
+          }
+          return took !== "" ? line + " · took " + took : line
+        }
+        return root._historyAvailable ? "Never checked" : "Last check: —"
+      }
       color: root.foreground
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
     }
 
+    // The error count comes from the parity log via parityHistory, not from
+    // array.parityCheckStatus — the API never fills that one in, so the "0"
+    // this line used to print was invented rather than read.
     Text {
       textFormat: Text.PlainText
-      text: "Errors: " + (root._parity.errors || 0)
-      color: (root._parity.errors || 0) > 0 ? Color.urgent : Qt.darker(root.foreground, 1.4)
+      visible: !root._parity.running && !root._parity.paused
+      text: {
+        if (!root._lastParity || root._lastParity.errors === null) return "Errors: unknown"
+        return "Errors: " + root._lastParity.errors
+      }
+      color: (root._lastParity && root._lastParity.errors > 0)
+        ? Color.urgent : Qt.darker(root.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall
     }

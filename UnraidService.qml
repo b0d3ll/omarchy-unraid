@@ -53,6 +53,10 @@ Item {
   // The per-disk lists ride along with the array summary, so they share its
   // query, its failure state and its freshness.
   readonly property var arrayDisks: arrayInfo.drives
+  readonly property var parityHistory: Api.normalizeParityHistory(parityHistoryQuery.result)
+  // The last completed check — the only place a real parity error count
+  // exists, since array.parityCheckStatus never carries one.
+  readonly property var lastParityCheck: parityHistory.last
   readonly property var docker: Api.normalizeDocker(dockerQuery.result)
   readonly property var vms: Api.normalizeVms(vmsQuery.result)
 
@@ -396,10 +400,11 @@ Item {
     dockerQuery.refresh()
     vmsQuery.refresh()
     notificationsQuery.refresh()
+    parityHistoryQuery.refresh()
   }
 
   function refreshMetrics() { metricsQuery.refresh() }
-  function refreshArray() { arrayQuery.refresh() }
+  function refreshArray() { arrayQuery.refresh(); parityHistoryQuery.refresh() }
   function refreshDocker() { dockerQuery.refresh() }
   function refreshVms() { vmsQuery.refresh() }
   function refreshNotifications() { notificationsQuery.refresh() }
@@ -579,6 +584,22 @@ Item {
     panelOpen: root.panelOpen
     intervalOpen: 15000
     intervalClosed: 60000
+  }
+
+  // Parity history. Slow on purpose: the query takes no arguments, so the
+  // server sends its whole log every time (~100 rows, 8.5 KB here) and there
+  // is no way to ask for less — and a check finishes a few times a month at
+  // most. Not wired to the connection manager for the same reason: minutes
+  // of silence between polls says nothing about reachability.
+  ResourceQuery {
+    id: parityHistoryQuery
+    queryString: Api.QUERY_PARITY_HISTORY
+    endpoint: root.endpoint
+    secretStore: root.secretStore
+    active: root.active
+    panelOpen: root.panelOpen
+    intervalOpen: 300000
+    intervalClosed: 900000
   }
 
   ResourceQuery {

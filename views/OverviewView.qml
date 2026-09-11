@@ -20,6 +20,27 @@ Column {
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
+  readonly property var _lastParity: service ? service.lastParityCheck : null
+  readonly property int _parityErrors:
+    (root._lastParity && root._lastParity.errors !== null) ? root._lastParity.errors : 0
+
+  // One line tying the array's health to when it was last verified — the
+  // array tile answers "is it up" and this answers "and is that trustworthy".
+  readonly property string _parityLine: {
+    if (root._parity.running) return "Parity check running"
+    if (root._parity.paused) return "Parity check paused"
+    if (!root._lastParity) {
+      return root.service && root.service.parityHistory.available
+        ? "Never parity checked" : ""
+    }
+    var when = Model.relativeTime(root._lastParity.finishedAt)
+    if (root._lastParity.status !== "COMPLETED") {
+      return "Parity " + root._lastParity.status.toLowerCase() + " · " + when
+    }
+    return (root._parityErrors > 0
+      ? "Parity: " + root._parityErrors + " error(s)"
+      : "Parity clean") + " · " + when
+  }
   readonly property var _system: service ? service.system : ({})
   readonly property var _docker: service ? service.docker : ({})
   readonly property var _vms: service ? service.vms : ({})
@@ -33,8 +54,16 @@ Column {
   // warnings and parity errors keep the urgent one.
   readonly property bool _urgent: root._unread > 0
     || (root._array.missing || 0) > 0
-    || (root._parity.errors || 0) > 0
+    || root._parityErrors > 0
   readonly property bool _attention: root._urgent || root._diskProblems > 0
+
+  // The live speed arrives as a bare number of MB/s ("143"), so it needs its
+  // unit back; a zero means the check isn't moving and is worth nothing.
+  readonly property string _paritySpeed: {
+    var raw = String(root._parity.speed || "").trim()
+    if (raw === "" || raw === "0") return ""
+    return /[a-z]/i.test(raw) ? raw : raw + " MB/s"
+  }
 
   function fmt(value, digits, suffix) {
     if (value === null || value === undefined || isNaN(value)) return "—"
@@ -73,7 +102,7 @@ Column {
           if ((root._array.invalid || 0) > 0) disk.push(root._array.invalid + " invalid")
           parts.push("Array disks: " + disk.join(", "))
         }
-        if ((root._parity.errors || 0) > 0) parts.push(root._parity.errors + " parity error(s)")
+        if (root._parityErrors > 0) parts.push(root._parityErrors + " parity error(s)")
         if (root._unread > 0) parts.push(root._unread + (root._unread === 1 ? " unread warning" : " unread warnings"))
         return parts.join(" · ")
       }
@@ -97,10 +126,12 @@ Column {
         : (root._array.missing || 0) > 0 ? "CRITICAL"
         : root._diskProblems > 0 ? "NOTICE"
         : "HEALTHY"
-      headline: root._array.state === "STARTED" ? "Started" : (root._array.state || "—")
+      headline: root._array.stateLabel || "—"
+      // A disk needing attention outranks parity trivia; otherwise the tile
+      // carries the last check.
       subline: root._diskProblems > 0
         ? root._diskProblems + " disk(s) need attention"
-        : ""
+        : root._parityLine
       foreground: root.foreground
     }
 
@@ -289,9 +320,13 @@ Column {
       fillColor: Color.accent
     }
 
+    // No error count here: the API reports errors only once a check has
+    // finished and been written to the parity log, so a running check has
+    // nothing truthful to say about them.
     Text {
       textFormat: Text.PlainText
-      text: (root._parity.speed || "—") + " · " + (root._parity.errors || 0) + " errors"
+      text: Math.round(root._parity.progress || 0) + "%"
+        + (root._paritySpeed !== "" ? " · " + root._paritySpeed : "")
       color: Qt.darker(root.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.bodySmall

@@ -56,11 +56,22 @@ var DISK_FIELDS = "idx name device type status rotational temp isSpinning "
 // whether or not anyone has the Storage tab open. Same `array` root, so it
 // is one round trip either way.
 var QUERY_ARRAY = "{ array { state capacity { kilobytes { used free total } } "
-  + "parityCheckStatus { status progress errors speed correcting paused running } "
+  + "parityCheckStatus { status progress speed date duration } "
   + "parities { " + DISK_FIELDS + " } "
   + "disks { " + DISK_FIELDS + " } "
   + "caches { " + DISK_FIELDS + " } } "
   + "vars { mdNumDisks mdNumDisabled mdNumInvalid mdNumMissing cacheNumDevices } }"
+
+// Parity history. Its own operation and its own slow poll: it takes no
+// arguments, so the server sends every check it has ever logged (~100 rows,
+// 8.5 KB here) and there is no way to ask for less. It also changes a few
+// times a month at most, so anything faster than minutes is pure waste.
+//
+// This is the only honest source for "was the last check clean". The
+// per-check `errors` here is parsed from the parity log; the one on
+// `array.parityCheckStatus` is never assigned a value at all (see
+// normalizeParity).
+var QUERY_PARITY_HISTORY = "{ parityHistory { date duration status errors } }"
 
 // iconUrl/shell are deliberately not requested: nothing renders container
 // icons yet and `shell` is only needed once M5 adds a console, and they
@@ -422,18 +433,93 @@ function normalizeArray(data) {
     cacheDevices: counts.cacheDevices,
     // Whether those five came from the disk list or from `vars`.
     countsDerived: counts.derived,
-    parityCheckStatus: {
-      status: parity.status || "",
-      // running/paused/correcting/errors come back null (not false/0) when
-      // no check is in progress.
-      running: parity.running === true,
-      paused: parity.paused === true,
-      correcting: parity.correcting === true,
-      progress: num(parity.progress, 0),
-      speed: parity.speed || "",
-      errors: num(parity.errors, 0)
-    }
+    parityCheckStatus: normalizeParity(parity),
+    stateLabel: arrayStateLabel(a.state)
   }
+}
+
+// `running`, `paused`, `correcting` and `errors` exist on the ParityCheck
+// type but the API never assigns them: getParityCheckStatus (unraid/api,
+// api/src/core/modules/array/parity-check-status.ts) returns only status,
+// speed, date, duration and progress, so the other four are always null.
+//
+// Reading them as booleans therefore meant `running` was permanently false,
+// and the parity progress bar on Overview was dead code that could not fire
+// during a real check. `errors` was worse than dead: `num(parity.errors, 0)`
+// turned a null into a confident 0, so "Errors: 0" was printed whether or
+// not the last check had found any. Real error counts live in
+// parityHistory, which parses the log.
+//
+// Status is populated, and it carries RUNNING and PAUSED, so derive from it.
+function normalizeParity(parity) {
+  var status = parity.status || ""
+  return {
+    status: status,
+    running: status === "RUNNING",
+    paused: status === "PAUSED",
+    progress: num(parity.progress, 0),
+    speed: parity.speed || "",
+    // The *start* of the last check — `duration` runs from here to the end.
+    startedAt: parity.date ? Date.parse(parity.date) : null,
+    durationSeconds: num(parity.duration, null)
+  }
+}
+
+// Newest first, defensively: the server already returns them that way, but
+// "the last check" is too load-bearing to leave to the server's ordering.
+function normalizeParityHistory(data) {
+  var rows = (data && data.parityHistory) || []
+  var checks = rows.map(function(r) {
+    return {
+      // Unlike parityCheckStatus.date, this one is when the check FINISHED.
+      finishedAt: r.date ? Date.parse(r.date) : null,
+      durationSeconds: num(r.duration, null),
+      status: r.status || "",
+      errors: num(r.errors, null)
+    }
+  }).filter(function(c) { return c.finishedAt !== null })
+  checks.sort(function(a, b) { return b.finishedAt - a.finishedAt })
+  return {
+    available: !!(data && data.parityHistory),
+    last: checks.length > 0 ? checks[0] : null,
+    count: checks.length
+  }
+}
+
+// "1 h 39 min" / "12 min" from a duration in seconds.
+function formatDuration(seconds) {
+  var total = num(seconds, null)
+  if (total === null || total <= 0) return ""
+  var hours = Math.floor(total / 3600)
+  var minutes = Math.round((total % 3600) / 60)
+  if (hours === 0) return minutes + " min"
+  if (minutes === 0) return hours + " h"
+  return hours + " h " + minutes + " min"
+}
+
+// ArrayState comes straight from emhttp's mdState, and "Started"/"Stopped"
+// is the Unraid webGUI's own wording for it — its Main page footer reads
+// "Array Started". The other nine are error states the view used to render
+// raw, so a server with a missing parity disk announced itself as
+// "PARITY_NOT_BIGGEST".
+var ARRAY_STATE_LABELS = {
+  STARTED: "Started",
+  STOPPED: "Stopped",
+  NEW_ARRAY: "New array",
+  RECON_DISK: "Rebuilding disk",
+  DISABLE_DISK: "Disk disabled",
+  SWAP_DSBL: "Swapping disabled disk",
+  INVALID_EXPANSION: "Invalid expansion",
+  PARITY_NOT_BIGGEST: "Parity disk too small",
+  TOO_MANY_MISSING_DISKS: "Too many missing disks",
+  NEW_DISK_TOO_SMALL: "New disk too small",
+  NO_DATA_DISKS: "No data disks"
+}
+
+function arrayStateLabel(state) {
+  var key = String(state || "")
+  if (key === "") return "—"
+  return ARRAY_STATE_LABELS[key] || key.charAt(0) + key.slice(1).toLowerCase().replace(/_/g, " ")
 }
 
 // ArrayDiskStatus spellings, in the order the Main page words them.
