@@ -128,6 +128,18 @@ Panel {
   // back into its list.
   function moveViewCursor(delta) { viewCursorCall("moveCursor", delta) }
   function activateViewCursor() { viewCursorCall("activateCursor", undefined) }
+  function focusViewSearch() { viewCursorCall("focusSearch", undefined) }
+
+  // A view that has handed the keyboard to a text field gets first refusal
+  // on Escape, so the first press leaves the field instead of closing the
+  // panel out from under someone mid-search.
+  function releaseViewKeyboard() {
+    var view = viewLoader.item
+    if (!view || typeof view.releaseKeyboard !== "function") return false
+    if (!view.releaseKeyboard()) return false
+    keyCatcher.forceActiveFocus()
+    return true
+  }
 
   // Scrolls a cursor target back into view. The item is mapped into the
   // flickable's content space rather than trusting its own `y`, which is
@@ -152,6 +164,7 @@ Panel {
   // from a container's log view meant reopening and clicking back down two
   // levels to get where you were.
   function escapePressed() {
+    if (releaseViewKeyboard()) return
     switch (activeView) {
       case "dockerLogs": activeView = "dockerDetail"; return
       case "dockerDetail": activeView = "docker"; return
@@ -374,6 +387,7 @@ Panel {
       onReturnRequested: root.activateViewCursor()
       onTextKey: function(t) {
         if (t >= "1" && t <= "5") root.selectTab(parseInt(t, 10) - 1)
+        else if (t === "/") root.focusViewSearch()
         else if (t === "r" || t === "R") { if (root.keyboardShortcutsActive) root.service.refresh() }
       }
 

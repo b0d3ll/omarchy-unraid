@@ -22,9 +22,39 @@ Column {
     if (query === "") return root._sorted
     return root._sorted.filter(function(c) { return c.name.toLowerCase().indexOf(query) >= 0 })
   }
-  // See VmsView for the contract; the only difference here is that the row
-  // set is the *filtered* one, so searching re-aims the cursor.
+  // See VmsView for the contract. Two differences here: the row set is the
+  // *filtered* one, so searching re-aims the cursor, and the search box is
+  // itself the first cursor target. It is the first thing on screen, so
+  // walking down from the top should reach it before the list — which is
+  // what makes it findable without knowing any shortcut.
+  //
+  // Index 0 is the search box; 1..n are rows, offset by one.
   property int cursorIndex: -1
+
+  readonly property bool _searchTargetable: root._docker.available
+  readonly property int _searchOffset: root._searchTargetable ? 1 : 0
+  readonly property int _cursorCount: root._filtered.length + root._searchOffset
+  readonly property bool _searchHasCursor:
+    root._searchTargetable && root.cursorIndex === 0
+
+  function rowHasCursor(index) {
+    return root.cursorIndex === index + root._searchOffset
+  }
+
+  // `/` from anywhere in the tab, the way every keyboard-driven list does it.
+  function focusSearch() {
+    if (!root._searchTargetable) return
+    root.cursorIndex = 0
+    searchField.forceActiveFocus()
+  }
+
+  // Escape hands the keyboard back before it backs out of the view, so the
+  // first press leaves the field rather than closing the panel under you.
+  function releaseKeyboard() {
+    if (!searchField.activeFocus) return false
+    searchField.focus = false
+    return true
+  }
 
   // Passes the item itself, not coordinates: a row's y is relative to
   // the Column it sits in, which is several parents away from the
@@ -32,20 +62,26 @@ Column {
   signal cursorRevealRequested(var item)
 
   function moveCursor(delta) {
-    if (root._filtered.length === 0) return
+    // Leaving the field by arrow also gives the keyboard back, or the next
+    // thing typed would still land in the search box.
+    if (searchField.activeFocus) searchField.focus = false
+    if (root._cursorCount === 0) return
     root.cursorIndex = root.cursorIndex < 0
-      ? 0
-      : Math.max(0, Math.min(root._filtered.length - 1, root.cursorIndex + delta))
+      ? (delta > 0 ? 0 : root._cursorCount - 1)
+      : Math.max(0, Math.min(root._cursorCount - 1, root.cursorIndex + delta))
   }
 
   function activateCursor() {
-    if (root.cursorIndex < 0 || root.cursorIndex >= root._filtered.length) return
-    root.containerSelected(root._filtered[root.cursorIndex].id)
+    if (root.cursorIndex < 0) return
+    if (root._searchHasCursor) { searchField.forceActiveFocus(); return }
+    var row = root.cursorIndex - root._searchOffset
+    if (row < 0 || row >= root._filtered.length) return
+    root.containerSelected(root._filtered[row].id)
   }
 
   // A search that shortens the list must not leave the cursor pointing past
   // the end of it.
-  onCursorIndexChanged: if (root.cursorIndex >= root._filtered.length) root.cursorIndex = -1
+  onCursorIndexChanged: if (root.cursorIndex >= root._cursorCount) root.cursorIndex = -1
 
   readonly property int _runningCount:
     (root._docker.containers || []).filter(function(c) { return c.state === "RUNNING" }).length
@@ -87,8 +123,12 @@ Column {
     id: searchField
     width: parent.width
     visible: root._docker.available
-    placeholderText: "Search containers…"
+    placeholderText: "Search containers…  (/)"
     foreground: root.foreground
+    hasCursor: root._searchHasCursor
+    // Hover writes to the same index as the keyboard, so mouse and keys
+    // can never light two things at once.
+    onHoveredChanged: if (hovered) root.cursorIndex = 0
   }
 
   ErrorState {
@@ -128,7 +168,7 @@ Column {
         width: root.width
         height: Style.space(36)
         foreground: root.foreground
-        hasCursor: root.cursorIndex === row.index
+        hasCursor: root.rowHasCursor(row.index)
 
         onHasCursorChanged: if (row.hasCursor) root.cursorRevealRequested(row)
 
@@ -187,7 +227,7 @@ Column {
           id: rowMouse
           anchors.fill: parent
           hoverEnabled: true
-          onContainsMouseChanged: if (containsMouse) root.cursorIndex = row.index
+          onContainsMouseChanged: if (containsMouse) root.cursorIndex = row.index + root._searchOffset
           cursorShape: Qt.PointingHandCursor
           onClicked: root.containerSelected(row.modelData.id)
         }

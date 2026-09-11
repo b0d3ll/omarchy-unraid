@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.7.0.** Onboarding saves a real server URL and
+**Status: v0.8.0.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -161,8 +161,9 @@ vim keys work without asking for them.
 | `←` / `→`, `h` / `l` | cycle tabs, wrapping |
 | `↑` / `↓`, `k` / `j` | move the cursor inside the tab |
 | `Enter` / `Space` | activate what the cursor is on |
+| `/` | jump to the Docker search box |
 | `r` | refresh everything |
-| `Esc` | back out one level, or close |
+| `Esc` | leave a text field, else back out one level, else close |
 
 The axes are split on purpose: horizontal is *which tab*, vertical is
 *which thing in it*. Sharing one axis would have needed a mode, and a mode
@@ -176,9 +177,21 @@ press that arms the cursor rather than jumping, and mouse hover writing to
 the same index, so there is exactly one highlight on screen whichever input
 is in use. The list scrolls to keep the cursor visible.
 
-Views opt in by implementing `moveCursor`/`activateCursor`; Panel does not
-know what they contain, so a view without them ignores the keys. Settings
-is the one tab not yet wired.
+On Docker the search box is the first cursor target, ahead of the rows —
+it is the first thing on screen, so walking down from the top reaches it
+before the list, which is what makes it findable without knowing `/`.
+Enter on it starts typing; an arrow key or `Esc` hands the keyboard back,
+so the next thing typed does not still land in the box. A search that
+shortens the list re-aims the cursor rather than leaving it past the end.
+
+`Esc` is staged: the first press leaves a focused text field, the next
+backs out of a detail view, the next closes the panel. Closing out from
+under someone mid-search would be the wrong first answer.
+
+Views opt in by implementing `moveCursor`/`activateCursor`, and optionally
+`focusSearch`/`releaseKeyboard`; Panel does not know what they contain, so
+a view without them ignores the keys. Settings is the one tab not yet
+wired.
 
 Buttons are listed explicitly per view rather than left to Qt's focus
 chain: they sit in separate sections with their own visibility rules, and
