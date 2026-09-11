@@ -48,7 +48,13 @@ var QUERY_METRICS = "{ metrics { cpu { percentTotal } memory { total used availa
 // hardcodes both to 0, so requesting them would render a confident lie.
 // `color` is skipped for the same reason (always null on 7.3.2).
 var DISK_FIELDS = "idx name device type status rotational temp isSpinning "
-  + "numErrors fsType fsSize fsFree fsUsed size transport"
+  + "numErrors fsType fsSize fsFree fsUsed size transport warning critical"
+
+// Unraid's own defaults from Settings > Disk Settings, used when a disk
+// reports no thresholds of its own — which is what this server does for
+// every disk, since they are only written once you change them.
+var DEFAULT_DISK_WARN_C = 45
+var DEFAULT_DISK_CRIT_C = 55
 
 // The per-disk lists ride along with the array summary rather than being a
 // separate, view-gated query. They have to: the bar's health dot is derived
@@ -642,6 +648,8 @@ function normalizeDisk(d) {
     errors: errors,
     fsType: d.fsType || "",
     transport: d.transport || "",
+    warnTempC: num(d.warning, DEFAULT_DISK_WARN_C),
+    critTempC: num(d.critical, DEFAULT_DISK_CRIT_C),
     sizeTb: kibToTb(d.size),
     totalTb: kbToTb(fsSize),
     usedTb: fsSize === null ? null : kbToTb(fsUsed),
@@ -666,6 +674,17 @@ function arrayDrives(data) {
   var spinning = countState("SPINNING")
   var standby = countState("STANDBY")
 
+  // The warmest disk that is actually reporting a temperature. A parked
+  // disk has none — the server never woke it to measure — so it is skipped
+  // rather than counted as cold, and an array that is entirely asleep
+  // yields null instead of a figure nobody measured.
+  var hottest = null
+  for (var i = 0; i < all.length; i++) {
+    var d = all[i]
+    if (d.temp === null) continue
+    if (hottest === null || d.temp > hottest.temp) hottest = d
+  }
+
   return {
     // A server with no array at all answers with empty lists rather than
     // null, so "did the query land" has to be asked of the reply itself.
@@ -679,6 +698,7 @@ function arrayDrives(data) {
     // Denominator for "3 of 11 spinning": SSDs are excluded, since they are
     // never anything else.
     spinnable: spinning + standby,
+    hottest: hottest,
     problems: all.filter(function(d) { return !d.healthy }).length
   }
 }

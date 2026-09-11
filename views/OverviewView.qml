@@ -19,6 +19,20 @@ Column {
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
   readonly property var _lastParity: service ? service.lastParityCheck : null
+  readonly property var _hottest:
+    (service && service.arrayDisks) ? service.arrayDisks.hottest : null
+  // Thresholds are the disk's own where Unraid has them, otherwise Unraid's
+  // defaults (45/55) — see Api.js. Colouring against each disk's own figures
+  // rather than one global number is what keeps a pool NVMe, which idles
+  // warmer than a platter, from being judged by a platter's standard.
+  readonly property bool _hotWarn:
+    root._hottest !== null && root._hottest.temp >= root._hottest.warnTempC
+  // Portion of the way from a cool-idle 20 °C to that disk's critical mark.
+  readonly property real _hotPercent: {
+    if (root._hottest === null) return 0
+    var span = Math.max(1, root._hottest.critTempC - 20)
+    return Math.max(0, Math.min(100, 100 * (root._hottest.temp - 20) / span))
+  }
   readonly property int _parityErrors:
     (root._lastParity && root._lastParity.errors !== null) ? root._lastParity.errors : 0
 
@@ -295,6 +309,50 @@ Column {
         width: parent.width
         value: root._capacity.usedPercent || 0
         fillColor: Color.accent
+      }
+    }
+
+    // Hottest disk. The bar is hidden when nothing is reporting, because a
+    // fully parked array has no temperature to draw — an empty bar would
+    // read as "cold" rather than "not measured".
+    Column {
+      width: parent.width
+      spacing: Style.space(4)
+
+      Item {
+        width: parent.width
+        implicitHeight: tempTitle.implicitHeight
+
+        Text {
+          id: tempTitle
+          textFormat: Text.PlainText
+          anchors.left: parent.left
+          text: "HOTTEST DISK"
+          color: Qt.darker(root.foreground, 1.4)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.bold: true
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          anchors.right: parent.right
+          text: root._hottest !== null
+            ? root._hottest.temp + " °C · " + root._hottest.name
+            : "all disks in standby"
+          color: root._hotWarn ? Color.urgent
+            : (root._hottest !== null ? root.foreground : Qt.darker(root.foreground, 1.6))
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.italic: root._hottest === null
+        }
+      }
+
+      ProgressBar {
+        width: parent.width
+        visible: root._hottest !== null
+        value: root._hotPercent
+        fillColor: root._hotWarn ? Color.urgent : Color.accent
       }
     }
   }

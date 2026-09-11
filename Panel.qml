@@ -242,7 +242,26 @@ Panel {
     bar: root.bar
     labelVisible: false
     hasVisualContent: true
-    tooltipText: root.service.system.hostname + " — " + root.healthLabel + " — " + root.service.connection.type
+    // Multi-line: the bar tooltip is a plain Text, so newlines are real
+    // line breaks and it grows to fit. Carries the same running counts the
+    // Overview tiles show, so the common question — is everything up —
+    // gets answered on hover without opening the panel.
+    tooltipText: {
+      var lines = [root.service.system.hostname + " — " + root.healthLabel]
+      var docker = root.service.docker
+      var vms = root.service.vms
+      lines.push(docker.available
+        ? "Docker: " + docker.containers.filter(function(c) { return c.state === "RUNNING" }).length
+          + " / " + docker.containers.length + " running"
+        : "Docker: unavailable")
+      lines.push(vms.available
+        ? "VMs: " + vms.domains.filter(function(v) { return v.state === "RUNNING" }).length
+          + " / " + vms.domains.length + " running"
+        : "VMs: unavailable")
+      var c = root.service.connection
+      lines.push(c.name !== "" ? c.name : c.type)
+      return lines.join("\n")
+    }
     implicitWidth: barRow.implicitWidth + scaledHorizontalMargin * 2
     onPressed: function(b) { root.toggle() }
 
