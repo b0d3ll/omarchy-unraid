@@ -387,9 +387,8 @@ Panel {
       }
     }
 
-    // Shared by the disk-details warning and the Docker stop/restart
-    // confirmations — whatever raised it supplies the message and what to
-    // run on confirm.
+    // Shared by the Docker stop/restart and VM force-stop confirmations —
+    // whatever raised it supplies the message and what to run on confirm.
     ConfirmDialog {
       id: confirmDialog
       anchors.fill: parent
@@ -555,10 +554,6 @@ Panel {
     StorageView {
       service: root.service
       foreground: root.barForeground
-      onLoadDiskDetailsRequested: root.askConfirm(
-        "Disk details\n\nSome current Unraid API versions may wake sleeping HDDs when detailed disk information is requested.",
-        "Load details",
-        function() { toast.show("Disk details view is coming once background polling is added.") })
     }
   }
 

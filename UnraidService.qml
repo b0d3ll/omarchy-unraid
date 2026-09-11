@@ -50,6 +50,9 @@ Item {
 
   readonly property var metrics: Api.normalizeMetrics(metricsQuery.result)
   readonly property var arrayInfo: Api.normalizeArray(arrayQuery.result)
+  // The per-disk lists ride along with the array summary, so they share its
+  // query, its failure state and its freshness.
+  readonly property var arrayDisks: arrayInfo.drives
   readonly property var docker: Api.normalizeDocker(dockerQuery.result)
   readonly property var vms: Api.normalizeVms(vmsQuery.result)
 
@@ -201,6 +204,9 @@ Item {
     (!vms.available && vmsQuery.failing) ? vmsQuery.errorMessage : ""
   readonly property string arrayErrorMessage:
     (!arrayQuery.hasData && arrayQuery.failing) ? arrayQuery.errorMessage : ""
+  // Distinguishes "waiting for the first reply" from "the array genuinely
+  // has no disks", so the Storage view can say the right one.
+  readonly property bool arrayPending: !arrayQuery.hasData && !arrayQuery.failing
 
   // ------------------------------------------------------ connection state
 

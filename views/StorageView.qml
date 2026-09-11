@@ -4,22 +4,25 @@ import qs.Commons
 import qs.Ui
 import "../components"
 
-// Array/capacity/parity summary (spec section 25), live as of Milestone 4.
-// MUST stay disk-sleep safe: nothing here queries per-disk or SMART data.
-// "Load disk details" only asks Panel.qml to raise the shared warning
-// dialog (spec section 26) — see Api.js for the invariant and
-// tests/no-disk-queries.sh for the check that enforces it.
+// Array/capacity/parity summary plus the per-disk list (spec sections
+// 25-26).
+//
+// The disk list is disk-sleep safe and needs no warning dialog: the API
+// answers `array { parities/disks/caches }` out of the emhttp state it
+// already holds in memory, so a parked drive stays parked and simply
+// reports no temperature. The evidence for that is in Api.js's header, and
+// tests/no-disk-queries.sh still guards the queries that genuinely do wake
+// disks (the top-level `disks` root and anything SMART).
 Column {
   id: root
 
   property var service: null
   property color foreground: Color.foreground
 
-  signal loadDiskDetailsRequested()
-
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
+  readonly property var _disks: service ? service.arrayDisks : null
 
   function fmt(value, digits, suffix) {
     if (value === null || value === undefined || isNaN(value)) return "—"
@@ -88,8 +91,10 @@ Column {
     }
   }
 
-  // Disk counters. Disabled/missing/invalid are the whole reason this view
-  // exists, so a non-zero count is coloured as urgent rather than left to
+  // Disk counters, counted from the per-disk status in the list below
+  // rather than read off `vars` — the two disagree on this server, and the
+  // status is the one the Unraid Main page draws (see arrayDiskCounts in
+  // Api.js). A non-zero count is coloured as urgent rather than left to
   // blend in with the healthy rows.
   Grid {
     width: parent.width
@@ -131,8 +136,9 @@ Column {
     }
 
     Text { textFormat: Text.PlainText; text: "Cache devices"; color: Qt.darker(root.foreground, 1.4); font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
-    // Reports NaN on servers without a cache pool, so "—" is the honest
-    // rendering rather than a made-up 0.
+    // Counted from the pool list. `vars.cacheNumDevices` answers NaN on this
+    // server — a partial GraphQL error and a null field — which rendered as
+    // "—" even though there are plainly two pool devices.
     Text { textFormat: Text.PlainText; text: root.count(root._array.cacheDevices); color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall }
   }
 
@@ -163,10 +169,97 @@ Column {
     }
   }
 
-  Button {
-    text: "Load disk details"
-    bordered: true
+  PanelSeparator { width: parent.width; foreground: root.foreground }
+
+  // ------------------------------------------------------------- disks
+
+  Item {
+    width: parent.width
+    implicitHeight: disksHeader.implicitHeight
+
+    PanelSectionHeader { id: disksHeader; text: "DISKS"; foreground: root.foreground }
+
+    // Spun-up count is the thing worth knowing at a glance, and it counts
+    // only rotational drives — an SSD is never anything but "spinning", so
+    // including them would inflate the number into meaninglessness.
+    Text {
+      textFormat: Text.PlainText
+      anchors.right: parent.right
+      anchors.baseline: disksHeader.baseline
+      visible: root._disks !== null && root._disks.available && root._disks.spinnable > 0
+      text: root._disks ? (root._disks.spinning + " of " + root._disks.spinnable + " spinning") : ""
+      color: Qt.darker(root.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+  }
+
+  // The disk list shares the array query, so its failure is already
+  // reported by the "Array status unavailable" box at the top of the view —
+  // repeating it here would just say the same thing twice.
+  EmptyState {
+    width: parent.width
+    visible: root.service && root.service.arrayErrorMessage === ""
+      && (!root._disks || !root._disks.available || root._disks.all.length === 0)
+    message: (root.service && root.service.arrayPending)
+      ? "Loading disks…"
+      : "The server reported no disks."
     foreground: root.foreground
-    onClicked: root.loadDiskDetailsRequested()
+  }
+
+  Column {
+    width: parent.width
+    visible: root._disks !== null && root._disks.available
+    spacing: Style.space(10)
+
+    Repeater {
+      model: [
+        { label: "Parity", key: "parities" },
+        { label: "Array", key: "disks" },
+        { label: "Pools", key: "caches" }
+      ]
+
+      Column {
+        id: group
+        required property var modelData
+        readonly property var rows: (root._disks && root._disks[group.modelData.key]) || []
+
+        width: parent.width
+        visible: group.rows.length > 0
+        spacing: Style.space(2)
+
+        Text {
+          textFormat: Text.PlainText
+          text: group.modelData.label
+          color: Qt.darker(root.foreground, 1.6)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          bottomPadding: Style.space(2)
+        }
+
+        Repeater {
+          model: group.rows
+
+          DiskRow {
+            required property var modelData
+            width: group.width
+            disk: modelData
+            foreground: root.foreground
+          }
+        }
+      }
+    }
+  }
+
+  Text {
+    width: parent.width
+    wrapMode: Text.WordWrap
+    textFormat: Text.PlainText
+    visible: root._disks !== null && root._disks.available && root._disks.standby > 0
+    text: "Read from the server's cached disk state, so drives in standby stay asleep — "
+      + "which is also why they report no temperature."
+    color: Qt.darker(root.foreground, 1.6)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
   }
 }

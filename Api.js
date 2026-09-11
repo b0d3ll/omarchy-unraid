@@ -6,12 +6,27 @@
 // 4.37.3) rather than taken from the spec — several spec queries don't
 // match that version (see normalizeSystem for the versions path). Keeping
 // the operations as plain strings in one pure-JS file also means
-// tests/no-disk-queries.sh can statically prove the disk-sleep invariant.
+// tests/no-disk-queries.sh can evaluate it and check the disk-sleep
+// invariant against the operations that actually get sent.
 //
 // DISK-SLEEP INVARIANT (spec section 51): no query in this file may ever
-// contain `disks`, `array { disks }` or `metrics { temperature }`. Those
-// can wake sleeping HDDs, and nothing here runs on a user gesture — it all
-// runs on a background timer. Disk details stay explicitly user-initiated.
+// reach the top-level `disks`/`disk` root, or ask for `smartStatus` /
+// `temperature` on the `Disk` type. Those go through the API's DisksService,
+// which shells out to `smartctl` and systeminformation's `diskLayout()` —
+// that is what wakes sleeping HDDs. Nothing here runs on a user gesture, so
+// nothing here may touch them. `tests/no-disk-queries.sh` enforces it.
+//
+// `array { parities/disks/caches }` is explicitly NOT part of that ban, and
+// the original blanket rule against the word `disks` was wider than the real
+// hazard. Verified in the API's own source (unraid/api,
+// api/src/core/modules/array/get-array-data.ts and
+// api/src/store/state-parsers/slots.ts): every ArrayDisk field — `temp` and
+// `isSpinning` included — is read straight out of the emhttp state the API
+// already holds in memory, parsed from `/var/local/emhttp/disks.ini`. It
+// issues no device I/O at all; it is the same data the Unraid Main page
+// renders, and `temp` comes back null for a parked disk rather than spinning
+// it up to answer. Confirmed against this server: seven disks stayed in
+// standby across repeated polls.
 //
 // Resource roots are kept in separate operations on purpose (spec section
 // 36): a Docker or VM subsystem being unavailable must not take array or
@@ -28,8 +43,23 @@ var QUERY_SYSTEM = "{ info { versions { core { unraid api } } os { uptime } } va
 
 var QUERY_METRICS = "{ metrics { cpu { percentTotal } memory { total used available percentTotal } } }"
 
+// Per-disk state (spec section 26). Safe to poll — see the disk-sleep note
+// above. `numReads`/`numWrites` are deliberately left out: the state parser
+// hardcodes both to 0, so requesting them would render a confident lie.
+// `color` is skipped for the same reason (always null on 7.3.2).
+var DISK_FIELDS = "idx name device type status rotational temp isSpinning "
+  + "numErrors fsType fsSize fsFree fsUsed size transport"
+
+// The per-disk lists ride along with the array summary rather than being a
+// separate, view-gated query. They have to: the bar's health dot is derived
+// from disk status now (see arrayDiskCounts), and that dot is on screen
+// whether or not anyone has the Storage tab open. Same `array` root, so it
+// is one round trip either way.
 var QUERY_ARRAY = "{ array { state capacity { kilobytes { used free total } } "
-  + "parityCheckStatus { status progress errors speed correcting paused running } } "
+  + "parityCheckStatus { status progress errors speed correcting paused running } "
+  + "parities { " + DISK_FIELDS + " } "
+  + "disks { " + DISK_FIELDS + " } "
+  + "caches { " + DISK_FIELDS + " } } "
   + "vars { mdNumDisks mdNumDisabled mdNumInvalid mdNumMissing cacheNumDevices } }"
 
 // iconUrl/shell are deliberately not requested: nothing renders container
@@ -247,12 +277,28 @@ function num(value, fallback) {
   return isFinite(n) ? n : (fallback === undefined ? null : fallback)
 }
 
-// Capacity arrives as strings of 1K blocks ("13196212077"), so convert via
-// bytes to keep the arithmetic honest.
+// The API hands out two different kilobytes on the same objects, so they get
+// two converters rather than one that is quietly wrong for half its callers.
+//
+// `fsSize`/`fsFree`/`fsUsed` — and therefore `array.capacity.kilobytes`,
+// which is just their sum — are converted from KiB to decimal KB by the
+// API's own state parser before they leave the server
+// (toNumberOrNullConvert(..., { startingUnit: 'KiB', endUnit: 'KB' })), so
+// they are already powers of ten. Treating them as KiB here overstated the
+// array by 2.4% — this box reported 14.7 TB for ten disks that add up to
+// 14.4 TB.
 function kbToTb(kilobytes) {
   var kb = num(kilobytes)
   if (kb === null) return null
-  return (kb * 1024) / 1e12
+  return kb / 1e9
+}
+
+// `size` is the raw slot size and does NOT go through that conversion: it
+// stays in 1K (KiB) blocks, exactly as emhttp wrote it.
+function kibToTb(kibiblocks) {
+  var kib = num(kibiblocks)
+  if (kib === null) return null
+  return (kib * 1024) / 1e12
 }
 
 // `names` is an array whose entries carry Docker's leading slash
@@ -306,26 +352,76 @@ function normalizeMetrics(data) {
   }
 }
 
+// The Disabled / Missing / Invalid / Cache counters.
+//
+// Derived from per-disk status whenever the disk lists are present, because
+// `vars` and the disk list can flatly disagree: this server reports
+// mdNumDisabled 1 and mdNumInvalid 1 while every single disk reports
+// DISK_OK, with the array started and a clean parity check behind it. The
+// API passes those numbers through from var.ini untouched
+// (state-parsers/var.ts is a plain toNumber of each field), so the
+// disagreement is emhttp's own bookkeeping, not a transport bug. Per-disk
+// status is what the Unraid Main page draws, so it wins — and it also
+// answers `cacheDevices`, which `vars` returns as NaN on a server with
+// pools (surfacing as a partial GraphQL error plus a null field).
+//
+// `vars` stays the fallback for a server that answers the summary but not
+// the disk lists, so nothing regresses if the lists ever go missing.
+function arrayDiskCounts(drives, vars) {
+  if (!drives.available) {
+    return {
+      disks: num(vars.mdNumDisks, null),
+      disabled: num(vars.mdNumDisabled, null),
+      invalid: num(vars.mdNumInvalid, null),
+      missing: num(vars.mdNumMissing, null),
+      cacheDevices: num(vars.cacheNumDevices, null),
+      derived: false
+    }
+  }
+
+  function countStatus(statuses) {
+    return drives.all.filter(function(d) { return statuses.indexOf(d.status) >= 0 }).length
+  }
+
+  return {
+    // Parity plus data slots, which is what mdNumDisks counts.
+    disks: drives.parities.length + drives.disks.length,
+    disabled: countStatus(["DISK_DSBL", "DISK_NP_DSBL", "DISK_DSBL_NEW"]),
+    // DISK_WRONG — the wrong drive sitting in a slot — has no counter of its
+    // own in `vars`. It belongs here rather than being silently dropped.
+    invalid: countStatus(["DISK_INVALID", "DISK_WRONG"]),
+    missing: countStatus(["DISK_NP_MISSING"]),
+    cacheDevices: drives.caches.length,
+    derived: true
+  }
+}
+
 function normalizeArray(data) {
   var a = (data && data.array) || {}
   var vars = (data && data.vars) || {}
   var kb = (a.capacity && a.capacity.kilobytes) || {}
   var parity = a.parityCheckStatus || {}
+  var drives = arrayDrives(data)
+  var counts = arrayDiskCounts(drives, vars)
   return {
     state: a.state || "",
+    // The per-disk lists, under their own key: `disks` at this level is
+    // already the slot *count*, and two different `disks` on one object is
+    // the kind of thing that gets read wrong exactly once.
+    drives: drives,
     capacity: {
       usedTb: kbToTb(kb.used),
       freeTb: kbToTb(kb.free),
       totalTb: kbToTb(kb.total),
       usedPercent: (num(kb.total, 0) > 0) ? (100 * num(kb.used, 0) / num(kb.total, 1)) : null
     },
-    disks: num(vars.mdNumDisks, null),
-    disabled: num(vars.mdNumDisabled, null),
-    invalid: num(vars.mdNumInvalid, null),
-    missing: num(vars.mdNumMissing, null),
-    // Returns NaN on servers without a cache pool, which surfaces as a
-    // partial GraphQL error plus a null field — render it as unknown.
-    cacheDevices: num(vars.cacheNumDevices, null),
+    disks: counts.disks,
+    disabled: counts.disabled,
+    invalid: counts.invalid,
+    missing: counts.missing,
+    cacheDevices: counts.cacheDevices,
+    // Whether those five came from the disk list or from `vars`.
+    countsDerived: counts.derived,
     parityCheckStatus: {
       status: parity.status || "",
       // running/paused/correcting/errors come back null (not false/0) when
@@ -337,6 +433,99 @@ function normalizeArray(data) {
       speed: parity.speed || "",
       errors: num(parity.errors, 0)
     }
+  }
+}
+
+// ArrayDiskStatus spellings, in the order the Main page words them.
+// DISK_NP is an empty slot, not a fault.
+var DISK_STATUS_LABELS = {
+  DISK_OK: "OK",
+  DISK_NP: "No device",
+  DISK_NP_MISSING: "Missing",
+  DISK_INVALID: "Invalid",
+  DISK_WRONG: "Wrong disk",
+  DISK_DSBL: "Disabled",
+  DISK_NP_DSBL: "Disabled, missing",
+  DISK_DSBL_NEW: "Disabled, new",
+  DISK_NEW: "New"
+}
+
+function diskStatusLabel(status) {
+  var key = String(status || "")
+  return DISK_STATUS_LABELS[key] || key.replace(/^DISK_/, "").replace(/_/g, " ") || "Unknown"
+}
+
+// Four states, not a boolean: an SSD reports isSpinning true forever, which
+// is true but meaningless, and a drive with no `spundown` in the ini reports
+// null. Only rotational media gets a spin verdict at all.
+function diskSpinState(disk) {
+  if (disk.rotational !== true) return "SOLID"
+  if (disk.isSpinning === true) return "SPINNING"
+  if (disk.isSpinning === false) return "STANDBY"
+  return "UNKNOWN"
+}
+
+function normalizeDisk(d) {
+  var fsSize = num(d.fsSize, null)
+  var fsUsed = num(d.fsUsed, null)
+  var errors = num(d.numErrors, 0)
+  var status = d.status || ""
+  var disk = {
+    idx: num(d.idx, 0),
+    name: d.name || "",
+    device: d.device || "",
+    // DATA | PARITY | CACHE | BOOT | FLASH
+    kind: d.type || "",
+    status: status,
+    statusLabel: diskStatusLabel(status),
+    healthy: (status === "DISK_OK" || status === "DISK_NP") && errors === 0,
+    rotational: d.rotational === true,
+    // null while the disk is parked: emhttp writes "*" into disks.ini rather
+    // than reading the drive to answer, so this is an absence of data, not a
+    // temperature of zero.
+    temp: num(d.temp, null),
+    isSpinning: (d.isSpinning === true || d.isSpinning === false) ? d.isSpinning : null,
+    errors: errors,
+    fsType: d.fsType || "",
+    transport: d.transport || "",
+    sizeTb: kibToTb(d.size),
+    totalTb: kbToTb(fsSize),
+    usedTb: fsSize === null ? null : kbToTb(fsUsed),
+    freeTb: fsSize === null ? null : kbToTb(d.fsFree),
+    usedPercent: (fsSize !== null && fsSize > 0 && fsUsed !== null)
+      ? (100 * fsUsed / fsSize) : null
+  }
+  disk.spinState = diskSpinState(disk)
+  return disk
+}
+
+function arrayDrives(data) {
+  var a = (data && data.array) || {}
+  var parities = (a.parities || []).map(normalizeDisk)
+  var disks = (a.disks || []).map(normalizeDisk)
+  var caches = (a.caches || []).map(normalizeDisk)
+  var all = parities.concat(disks, caches)
+
+  function countState(state) {
+    return all.filter(function(d) { return d.spinState === state }).length
+  }
+  var spinning = countState("SPINNING")
+  var standby = countState("STANDBY")
+
+  return {
+    // A server with no array at all answers with empty lists rather than
+    // null, so "did the query land" has to be asked of the reply itself.
+    available: !!(a.parities || a.disks || a.caches),
+    parities: parities,
+    disks: disks,
+    caches: caches,
+    all: all,
+    spinning: spinning,
+    standby: standby,
+    // Denominator for "3 of 11 spinning": SSDs are excluded, since they are
+    // never anything else.
+    spinnable: spinning + standby,
+    problems: all.filter(function(d) { return !d.healthy }).length
   }
 }
 

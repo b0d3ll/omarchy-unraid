@@ -46,13 +46,16 @@ Alerts tab. Notifications can also be archived from there.
 - VMs: live list plus a per-VM detail view with start/stop/reboot and,
   under "More", pause and force stop — the latter behind a confirmation
   that spells out that it's the equivalent of cutting power.
-- Storage (incl. disabled/missing/invalid disk counts) and Alerts — click a
-  notification to open it in the Unraid WebUI, or archive it.
+- Storage: array state and capacity, the disabled/missing/invalid counts,
+  parity status, and a per-disk list — parity, array disks and pools, each
+  with its spin state, temperature, usage and status. A spun-down drive is
+  shown as "standby" and stays asleep; the section header says how many
+  rotating drives are currently spinning. The counters are counted from
+  per-disk status rather than read off `vars` — see below.
+- Alerts — click a notification to open it in the Unraid WebUI, or archive
+  it.
 - Settings: live Unraid/API version and uptime, plus editing the server
   address and replacing the API key.
-- "Load disk details" shows the disk-sleep warning dialog (loads nothing
-  yet — per-disk queries stay strictly user-initiated).
-
 - Settings > Connections: the endpoint list with priority order, live
   endpoint and latency, per-endpoint reachability test, and endpoint
   auto-detection.
@@ -79,10 +82,31 @@ node tests/selection.test.js
 
 ## Disk-sleep safety
 
-Current Unraid API versions can spin up sleeping HDDs when asked for
-per-disk or temperature data, so no background query ever asks for it.
-`tests/no-disk-queries.sh` enforces that statically — run it before
-committing changes to `Api.js`.
+What actually wakes a sleeping HDD is the API's `DisksService`, behind the
+top-level `disks`/`disk` query root: it shells out to `smartctl` and to
+systeminformation's `diskLayout()`, so `Disk.temperature` and
+`Disk.smartStatus` cost a spin-up. No query in the plugin may go near
+those.
+
+`array { parities/disks/caches }` is *not* in that category, which is why
+the Storage view can list every drive without touching one. Those fields
+are read out of the emhttp state the API already holds in memory, parsed
+from `/var/local/emhttp/disks.ini` — see `get-array-data.ts` and
+`state-parsers/slots.ts` in [unraid/api](https://github.com/unraid/api).
+Every `ArrayDisk` field comes from that file, `temp` and `isSpinning`
+included, so a parked drive answers `temp: null` instead of being woken to
+report a number. It is the same data the Unraid Main page renders.
+
+The plugin's original rule banned the word `disks` outright, which was
+wider than the real hazard and cost the Storage view its whole disk list.
+`tests/no-disk-queries.sh` now enforces the narrow version — it evaluates
+`Api.js` and checks the operations that are actually sent, so a query
+assembled from fragments is judged whole. Run it before committing changes
+to `Api.js`:
+
+```bash
+./tests/no-disk-queries.sh
+```
 
 ## Local development
 
@@ -120,5 +144,29 @@ omarchy restart shell
 
 Every milestone in the v0.1 spec is now implemented. Deliberately out of
 scope for v0.1:
-multiple servers, container updates/installs, share management, SMART and
-temperature monitoring, and Unraid Connect as a transport.
+multiple servers, container updates/installs, share management, SMART
+monitoring, and Unraid Connect as a transport.
+
+## Disk counters
+
+`vars.mdNumDisabled` and `vars.mdNumInvalid` can report a count while every
+disk in the array reports `DISK_OK`, with the array started and a clean
+parity check behind it. The API passes those numbers through from `var.ini`
+untouched (`state-parsers/var.ts` is a plain `toNumber` per field), so the
+disagreement is emhttp's own bookkeeping rather than anything in transit —
+but it was enough to keep the bar's health dot permanently on "attention
+needed".
+
+So Disabled / Missing / Invalid / Cache devices are now counted from the
+per-disk `status` in the array's own disk list, which is what the Unraid
+Main page draws. `vars` stays the fallback for a server that answers the
+array summary but not the disk lists, and `arrayInfo.countsDerived` says
+which of the two a given reading came from. Counting from the list also
+fixes the cache count: `vars.cacheNumDevices` answers `NaN` on a server
+with pools — a partial GraphQL error and a null field — which used to
+render as "—" next to two plainly present pool devices.
+
+This is why the disk lists ride along with the array summary in one query
+instead of being fetched only while the Storage tab is open: the health dot
+is derived from them and is on screen whether or not anyone has that tab
+open.
