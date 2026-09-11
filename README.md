@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.5.0.** Onboarding saves a real server URL and
+**Status: v0.6.0.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -104,7 +104,7 @@ stop at 680px, which only ever bit on the long views — Storage's disk list
 and Docker's container list — cutting them off at a height that had
 nothing to do with how much room the screen had.
 
-## CPU cores
+## CPU cores and memory
 
 Clicking the CPU row expands a strip with one column per core — 40 of them
 on the machine this was built against — each a miniature track and fill,
@@ -114,6 +114,24 @@ worth spending once the total has told you to look.
 The per-core figures ride along with the CPU total rather than getting
 their own query: it is the same resolver, and forty floats is nothing next
 to the round trip it would cost.
+
+The RAM row expands the same way. There is no per-DIMM figure in the API,
+so what it shows is what the one number is made of:
+
+| Row | Meaning |
+| --- | --- |
+| In use | `total - available`, the figure the bar draws |
+| Cache | `buffcache` — counted as used by Linux, available to anything that needs it |
+| Available | what something could actually get |
+| Swap | used / total, or "none configured" |
+
+`used` is deliberately not among them. The server reports 136 GB used on a
+box whose applications hold 14, because Linux counts 128 GB of page cache
+as used — printing that as "RAM used" would be true and useless. In use
+and Available sum to the total, so checking the arithmetic is not punished
+with a contradiction.
+
+Swap was not reported at all before this.
 
 ## Disk temperature
 

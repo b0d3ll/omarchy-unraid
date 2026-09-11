@@ -19,6 +19,9 @@ Column {
   // Collapsed by default: 40 bars is a lot of panel to spend on something
   // you only look at when the total already told you to.
   property bool cpuExpanded: false
+  // Same idea for RAM. There is no per-DIMM figure in the API — the nearest
+  // useful thing is what the one number is actually made of.
+  property bool ramExpanded: false
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
@@ -324,11 +327,22 @@ Column {
         width: parent.width
         implicitHeight: ramTitle.implicitHeight
 
+        MouseArea {
+          anchors.fill: parent
+          anchors.margins: -Style.space(4)
+          enabled: root._metrics.ramTotalGb ? true : false
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.ramExpanded = !root.ramExpanded
+        }
+
         Text {
           id: ramTitle
           textFormat: Text.PlainText
           anchors.left: parent.left
-          text: "RAM"
+          text: root._metrics.ramTotalGb
+            ? (root.ramExpanded ? "RAM ▾" : "RAM ▸")
+            : "RAM"
           color: Qt.darker(root.foreground, 1.4)
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
@@ -353,6 +367,41 @@ Column {
         width: parent.width
         value: root._metrics.ramPercent || 0
         fillColor: Color.accent
+      }
+
+      // What the single number is made of. "In use" and "Available" sum to
+      // the total; cache is called out separately because it counts as
+      // used by Linux and as available by anything that needs it, and
+      // saying so is the whole reason this breakdown is worth a click.
+      Grid {
+        width: parent.width
+        visible: root.ramExpanded && root._metrics.ramTotalGb
+        columns: 2
+        columnSpacing: Style.space(12)
+        rowSpacing: Style.space(2)
+        topPadding: Style.space(4)
+        leftPadding: Style.space(2)
+
+        Text { textFormat: Text.PlainText; text: "In use"; color: Qt.darker(root.foreground, 1.6); font.family: Style.font.family; font.pixelSize: Style.font.caption }
+        Text { textFormat: Text.PlainText; text: root.fmt(root._metrics.ramUsedGb, 0, " GB"); color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.caption }
+
+        Text { textFormat: Text.PlainText; text: "Cache"; color: Qt.darker(root.foreground, 1.6); font.family: Style.font.family; font.pixelSize: Style.font.caption }
+        Text { textFormat: Text.PlainText; text: root.fmt(root._metrics.ramCacheGb, 0, " GB") + "  (reclaimable)"; color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.caption }
+
+        Text { textFormat: Text.PlainText; text: "Available"; color: Qt.darker(root.foreground, 1.6); font.family: Style.font.family; font.pixelSize: Style.font.caption }
+        Text { textFormat: Text.PlainText; text: root.fmt(root._metrics.ramAvailableGb, 0, " GB"); color: root.foreground; font.family: Style.font.family; font.pixelSize: Style.font.caption }
+
+        Text { textFormat: Text.PlainText; text: "Swap"; color: Qt.darker(root.foreground, 1.6); font.family: Style.font.family; font.pixelSize: Style.font.caption }
+        Text {
+          textFormat: Text.PlainText
+          text: root._metrics.swapConfigured
+            ? root.fmt(root._metrics.swapUsedGb, 0) + " / " + root.fmt(root._metrics.swapTotalGb, 0, " GB")
+            : "none configured"
+          color: (root._metrics.swapPercent || 0) > 50 ? Color.urgent : root.foreground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          font.italic: !root._metrics.swapConfigured
+        }
       }
     }
 
@@ -381,7 +430,7 @@ Column {
           textFormat: Text.PlainText
           anchors.right: parent.right
           text: root._capacity.totalTb
-            ? root.fmt(root._capacity.usedTb) + " / " + root.fmt(root._capacity.totalTb, 1, " TB used")
+            ? root.fmt(root._capacity.usedTb) + " / " + root.fmt(root._capacity.totalTb, 1, " TB")
             : "—"
           color: root.foreground
           font.family: Style.font.family

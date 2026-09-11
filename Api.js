@@ -46,7 +46,8 @@ var QUERY_SYSTEM = "{ info { versions { core { unraid api } } os { uptime } } va
 // query, because it is the same resolver and 40 floats is nothing next to
 // the round trip it would otherwise cost.
 var QUERY_METRICS = "{ metrics { cpu { percentTotal cpus { percentTotal } } "
-  + "memory { total used available percentTotal } } }"
+  + "memory { total used available buffcache percentTotal "
+  + "swapTotal swapUsed percentSwapTotal } } }"
 
 // Per-disk state (spec section 26). Safe to poll — see the disk-sleep note
 // above. `numReads`/`numWrites` are deliberately left out: the state parser
@@ -429,13 +430,30 @@ function normalizeMetrics(data) {
   // percentage. Derive the label from the same figures as the bar so the
   // number and the percentage can't contradict each other.
   var usedBytes = total > 0 ? Math.max(0, total - available) : num(mem.used, 0)
+  // The breakdown behind that one number. `used` is not among them on
+  // purpose: the server reports 136 GB used on a box whose applications
+  // hold 14, because Linux counts the 128 GB of page cache as used. Cache
+  // is reclaimable, so it is named separately and `available` is the figure
+  // that answers "how much could something have".
+  //
+  // These two do add up — usedBytes is total minus available — so a reader
+  // who checks the arithmetic is not rewarded with a contradiction.
+  var swapTotal = num(mem.swapTotal, 0)
   return {
     cpuPercent: Math.round(num(cpu.percentTotal, 0)),
     // One rounded percentage per core, in the order the server lists them.
     cores: (cpu.cpus || []).map(function(c) { return Math.round(num(c.percentTotal, 0)) }),
     ramPercent: Math.round(num(mem.percentTotal, 0)),
     ramUsedGb: total > 0 ? usedBytes / 1e9 : null,
-    ramTotalGb: total > 0 ? total / 1e9 : null
+    ramTotalGb: total > 0 ? total / 1e9 : null,
+    ramCacheGb: total > 0 ? num(mem.buffcache, 0) / 1e9 : null,
+    ramAvailableGb: total > 0 ? available / 1e9 : null,
+    // A machine with no swap configured reports zeros across the board;
+    // that is "none", not "none used", and the view says so.
+    swapConfigured: swapTotal > 0,
+    swapTotalGb: swapTotal > 0 ? swapTotal / 1e9 : null,
+    swapUsedGb: swapTotal > 0 ? num(mem.swapUsed, 0) / 1e9 : null,
+    swapPercent: swapTotal > 0 ? Math.round(num(mem.percentSwapTotal, 0)) : 0
   }
 }
 
