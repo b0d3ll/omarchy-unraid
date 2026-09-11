@@ -3,15 +3,17 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.8.0.** Onboarding saves a real server URL and
-API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
-keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
+**v0.8.0.** Onboarding saves the server URL and API key (URL in
+`~/.config/omarchy-unraid/config.json`, the key in the system keyring via
+`secret-tool` — never in a config file, and never on a command line where
+`ps` could read it). The whole panel runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
 and notifications. Verified against Unraid 7.3.2 / API 4.37.4.
 
 Clicking a container or VM opens a detail view with controls — containers
 get Start / Stop / Restart, Open WebUI and a log viewer; VMs get Start /
-Stop / Reboot plus Pause, Resume and Force stop. Controlling anything
+Stop / Reboot plus Pause, Resume, Reset and Force stop — every VM mutation
+the API exposes. Controlling anything
 needs an API key with the matching update permission (Unraid → Settings →
 Management Access → API Keys); a read-only key still gets everything else,
 and the controls say exactly what's missing instead of failing silently.
@@ -26,6 +28,22 @@ Newly arrived warnings and alerts can raise a desktop notification (off by
 default, under Settings > Behavior); clicking one opens the panel on the
 Notices tab. Notifications can also be archived from there. Only warnings
 and alerts are announced — INFO notices are listed, never pushed.
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/b0d3ll/omarchy-unraid.git --enable
+omarchy restart shell
+```
+
+Open the panel from the bar and the setup wizard takes it from there:
+server address, then an API key (Unraid → Settings → Management Access →
+API Keys). A read-only key gets every view; controlling Docker, VMs, the
+array or a parity check needs the matching update permission, and the
+controls say exactly what is missing rather than failing silently.
+
+Update with `omarchy plugin update io.github.b0d3ll.omarchy-unraid`, remove
+with `omarchy plugin remove io.github.b0d3ll.omarchy-unraid`.
 
 ## Requirements
 
@@ -384,8 +402,7 @@ unknown future value rather than shouting it.
 
 ## Roadmap
 
-Every milestone in the v0.1 spec is now implemented. Deliberately out of
-scope for v0.1:
+Deliberately out of scope so far:
 multiple servers, container updates/installs, share management, SMART
 monitoring, and Unraid Connect as a transport.
 
@@ -410,7 +427,7 @@ that `parityCheckStatus.date` is when a check *started* while
 A running check reports no error count anywhere, so the progress view
 shows percentage and speed and says nothing about errors.
 
-## Dead weight removed in 0.2.0
+## Things the API gets wrong, and what this does about it
 
 `vars.cacheNumDevices` is gone from the array query. It is the legacy
 single-cache count and answers `NaN` on any server with named pools, which
