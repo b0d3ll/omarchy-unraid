@@ -14,8 +14,6 @@ Column {
   property var service: null
   property color foreground: Color.foreground
 
-  signal toastRequested(string message)
-
   readonly property var _metrics: service ? service.metrics : ({})
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})

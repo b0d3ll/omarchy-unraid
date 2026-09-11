@@ -12,7 +12,6 @@ Column {
   property var service: null
   property color foreground: Color.foreground
 
-  signal toastRequested(string message)
   signal domainSelected(string domainId)
 
   readonly property var _vms: service ? service.vms : ({ available: false, domains: [] })

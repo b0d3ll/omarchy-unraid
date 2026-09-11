@@ -63,11 +63,9 @@ Item {
   readonly property var notificationSummary: Api.normalizeNotifications(notificationsQuery.result)
   // Every unread notice, INFO included — what the Notices list shows.
   readonly property var notifications: notificationSummary.items
-  // Just the ones that mean something is wrong.
-  readonly property var attentionNotifications: notificationSummary.attention
   // The server's own unread counters rather than the length of the list
-  // above: this is the "needs attention" count that the tab badge and the
-  // health ladder read, so a routine INFO notice must not inflate it.
+  // above: this is the "needs attention" figure the health ladder and the
+  // Overview banner read, so a routine INFO notice must not inflate it.
   readonly property int unreadNotificationCount:
     notificationSummary.unread.warning + notificationSummary.unread.alert
 

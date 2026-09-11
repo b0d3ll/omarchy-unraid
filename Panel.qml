@@ -526,7 +526,6 @@ Panel {
     OverviewView {
       service: root.service
       foreground: root.barForeground
-      onToastRequested: function(message) { toast.show(message) }
     }
   }
 
@@ -535,7 +534,6 @@ Panel {
     DockerView {
       service: root.service
       foreground: root.barForeground
-      onToastRequested: function(message) { toast.show(message) }
       onContainerSelected: function(containerId) {
         root.selectedContainerId = containerId
         root.activeView = "dockerDetail"
@@ -574,7 +572,6 @@ Panel {
     VmsView {
       service: root.service
       foreground: root.barForeground
-      onToastRequested: function(message) { toast.show(message) }
       onDomainSelected: function(domainId) {
         root.selectedDomainId = domainId
         root.activeView = "vmDetail"

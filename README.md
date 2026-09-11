@@ -7,7 +7,7 @@ the desktop.
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
-and notifications. Verified against Unraid 7.3.2 / API 4.37.3.
+and notifications. Verified against Unraid 7.3.2 / API 4.37.4.
 
 Clicking a container or VM opens a detail view with controls — containers
 get Start / Stop / Restart, Open WebUI and a log viewer; VMs get Start /

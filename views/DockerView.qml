@@ -13,7 +13,6 @@ Column {
   property var service: null
   property color foreground: Color.foreground
 
-  signal toastRequested(string message)
   signal containerSelected(string containerId)
 
   readonly property var _docker: service ? service.docker : ({ available: false, containers: [] })

@@ -712,11 +712,10 @@ function normalizeNotifications(data) {
   })
   return {
     // Everything unread, INFO included — what the Notices list renders.
+    // Callers that care about severity read each item's `needsAttention`
+    // rather than a pre-filtered second list, which only ever had one
+    // consumer and then lost it.
     items: normalized,
-    // The subset that means something is wrong. Desktop notifications and
-    // the tab's count key off this, so a nightly "Docker Auto Update"
-    // notice never raises an alarm or pings the desktop.
-    attention: normalized.filter(notificationNeedsAttention),
     unread: {
       info: num(unread.info, 0),
       warning: num(unread.warning, 0),

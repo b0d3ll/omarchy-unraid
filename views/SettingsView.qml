@@ -6,10 +6,13 @@ import "../components"
 import ".." as Plugin
 import "../Api.js" as Api
 
-// Server/Connections/Authentication are real now (spec section 28).
-// Behavior and About stay placeholders — Behavior's refresh-interval/
-// cache toggles depend on the polling that doesn't exist until Milestone
-// 3/4, and About doesn't need content before there's a public release.
+// Every section here is live (spec section 28): Server reads the current
+// poll, Connections drives the endpoint list, Authentication replaces the
+// stored key, Behavior owns the desktop-notification toggle, About carries
+// the version. The refresh-interval and cache toggles the spec sketched
+// were dropped rather than deferred — the panel already slows its polling
+// while closed and keeps its last values when offline, so there was
+// nothing left for them to decide.
 Column {
   id: root
 
