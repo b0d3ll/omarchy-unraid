@@ -105,6 +105,49 @@ Panel {
     selectTab((current + delta + _tabs.length) % _tabs.length)
   }
 
+  // ---------------------------------------------------------- view cursor
+  //
+  // Up/down and j/k drive a cursor inside the active view; left/right and
+  // h/l stay on the tab row. Splitting the axes that way keeps one mental
+  // model — horizontal is which tab, vertical is which thing in it — and
+  // avoids the mode switch a shared axis would need.
+  //
+  // Views opt in by implementing moveCursor/activateCursor. Panel does not
+  // know what they contain, so a view without them simply ignores the keys.
+  function viewCursorCall(name, arg) {
+    var view = viewLoader.item
+    if (!view || !keyboardShortcutsActive) return false
+    if (typeof view[name] !== "function") return false
+    view[name](arg)
+    return true
+  }
+
+  // No cursor reset on a view change is needed: each view is its own
+  // component, so the Loader destroys and rebuilds it and the index starts
+  // at -1 by construction. Verified by walking out of a detail view and
+  // back into its list.
+  function moveViewCursor(delta) { viewCursorCall("moveCursor", delta) }
+  function activateViewCursor() { viewCursorCall("activateCursor", undefined) }
+
+  // Scrolls a cursor target back into view. The item is mapped into the
+  // flickable's content space rather than trusting its own `y`, which is
+  // relative to whichever Column it happens to sit in.
+  //
+  // `flick` is held as a var because ScrollView types contentItem as
+  // QQuickItem: reading contentY off it is correct at runtime but
+  // unverifiable to qmllint, and this keeps the lint output honest.
+  function revealInScroll(item) {
+    var flick = scrollView.contentItem
+    if (!item || !flick || flick.height <= 0) return
+    var y = item.mapToItem(flick.contentItem, 0, 0).y
+    var h = item.height
+    if (y < flick.contentY) flick.contentY = Math.max(0, y)
+    else if (y + h > flick.contentY + flick.height) {
+      flick.contentY = Math.min(Math.max(0, flick.contentHeight - flick.height),
+        y + h - flick.height)
+    }
+  }
+
   // Escape backs out one level before it closes the panel. Closing outright
   // from a container's log view meant reopening and clicking back down two
   // levels to get where you were.
@@ -325,7 +368,10 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onMoveRequested: function(dx, dy) {
         if (dx !== 0) root.switchTabBy(dx > 0 ? 1 : -1)
+        else if (dy !== 0) root.moveViewCursor(dy > 0 ? 1 : -1)
       }
+      onActivateRequested: root.activateViewCursor()
+      onReturnRequested: root.activateViewCursor()
       onTextKey: function(t) {
         if (t >= "1" && t <= "5") root.selectTab(parseInt(t, 10) - 1)
         else if (t === "r" || t === "R") { if (root.keyboardShortcutsActive) root.service.refresh() }
@@ -629,6 +675,7 @@ Panel {
     DockerView {
       service: root.service
       foreground: root.barForeground
+      onCursorRevealRequested: function(item) { root.revealInScroll(item) }
       onContainerSelected: function(containerId) {
         root.selectedContainerId = containerId
         root.activeView = "dockerDetail"
@@ -667,6 +714,7 @@ Panel {
     VmsView {
       service: root.service
       foreground: root.barForeground
+      onCursorRevealRequested: function(item) { root.revealInScroll(item) }
       onDomainSelected: function(domainId) {
         root.selectedDomainId = domainId
         root.activeView = "vmDetail"
@@ -707,6 +755,7 @@ Panel {
     AlertsView {
       service: root.service
       foreground: root.barForeground
+      onCursorRevealRequested: function(item) { root.revealInScroll(item) }
       onArchiveAllRequested: function(message, confirmText, importance, count) {
         root.askConfirm(message, confirmText, function() {
           root.service.archiveAllNotifications(importance, count)

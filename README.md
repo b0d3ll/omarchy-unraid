@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.6.0.** Onboarding saves a real server URL and
+**Status: v0.7.0.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -159,8 +159,32 @@ vim keys work without asking for them.
 | --- | --- |
 | `1`–`5` | jump to a tab |
 | `←` / `→`, `h` / `l` | cycle tabs, wrapping |
+| `↑` / `↓`, `k` / `j` | move the cursor inside the tab |
+| `Enter` / `Space` | activate what the cursor is on |
 | `r` | refresh everything |
 | `Esc` | back out one level, or close |
+
+The axes are split on purpose: horizontal is *which tab*, vertical is
+*which thing in it*. Sharing one axis would have needed a mode, and a mode
+is a thing to remember.
+
+Vertically the cursor walks container and VM rows, notification rows, and
+the buttons on the detail, Storage and Overview views — so a container can
+be found, opened and restarted without the mouse. It follows Omarchy's own
+convention: `CursorSurface`/`hasCursor` for the highlight, a first arrow
+press that arms the cursor rather than jumping, and mouse hover writing to
+the same index, so there is exactly one highlight on screen whichever input
+is in use. The list scrolls to keep the cursor visible.
+
+Views opt in by implementing `moveCursor`/`activateCursor`; Panel does not
+know what they contain, so a view without them ignores the keys. Settings
+is the one tab not yet wired.
+
+Buttons are listed explicitly per view rather than left to Qt's focus
+chain: they sit in separate sections with their own visibility rules, and
+an array states the traversal order out loud instead of leaving it implied
+by declaration order in three places. `visible` already accounts for
+ancestors, so a button inside a hidden row filters itself out.
 
 `Esc` leaves a detail view for its list before it closes the panel —
 closing outright from a container's log view meant reopening and clicking

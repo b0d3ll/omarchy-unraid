@@ -21,6 +21,31 @@ Column {
   property var service: null
   property color foreground: Color.foreground
 
+  // Keyboard cursor over the view's buttons — see VmDetailView for why this
+  // is an explicit list rather than Qt's focus chain.
+  property int cursorIndex: -1
+  readonly property var _cursorTargets:
+    root._buttons.filter(function(b) { return b && b.visible })
+
+  function moveCursor(delta) {
+    var n = root._cursorTargets.length
+    if (n === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? (delta > 0 ? 0 : n - 1)
+      : Math.max(0, Math.min(n - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    var target = root._cursorTargets[root.cursorIndex]
+    if (target && target.enabled) target.clicked()
+  }
+
+  function buttonHasCursor(button) {
+    return root._cursorTargets[root.cursorIndex] === button
+  }
+
+  readonly property var _buttons: [arrayStopButton, arrayStartButton, parityCheckButton, parityCorrectButton, parityPauseButton, parityResumeButton, parityCancelButton]
+
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
@@ -96,6 +121,8 @@ Column {
     // Starting is not destructive and goes straight through.
     Button {
       visible: root._started
+      id: arrayStopButton
+      hasCursor: root.buttonHasCursor(arrayStopButton)
       text: root.pendingLabel("arrayStop", "Stop array")
       bordered: true
       foreground: Color.urgent
@@ -109,6 +136,8 @@ Column {
 
     Button {
       visible: !root._started
+      id: arrayStartButton
+      hasCursor: root.buttonHasCursor(arrayStartButton)
       text: root.pendingLabel("arrayStart", "Start array")
       bordered: true
       foreground: root.foreground
@@ -254,6 +283,8 @@ Column {
       // avoid — so the confirmation says so plainly.
       Button {
         visible: !root._parity.running && !root._parity.paused
+        id: parityCheckButton
+        hasCursor: root.buttonHasCursor(parityCheckButton)
         text: root.pendingLabel("parityCheck", "Check")
         bordered: true
         foreground: root.foreground
@@ -270,6 +301,8 @@ Column {
       // one that is wrong.
       Button {
         visible: !root._parity.running && !root._parity.paused
+        id: parityCorrectButton
+        hasCursor: root.buttonHasCursor(parityCorrectButton)
         text: root.pendingLabel("parityCorrect", "Check & correct")
         bordered: true
         foreground: Color.urgent
@@ -283,6 +316,8 @@ Column {
 
       Button {
         visible: root._parity.running
+        id: parityPauseButton
+        hasCursor: root.buttonHasCursor(parityPauseButton)
         text: root.pendingLabel("parityPause", "Pause")
         bordered: true
         foreground: root.foreground
@@ -292,6 +327,8 @@ Column {
 
       Button {
         visible: root._parity.paused
+        id: parityResumeButton
+        hasCursor: root.buttonHasCursor(parityResumeButton)
         text: root.pendingLabel("parityResume", "Resume")
         bordered: true
         foreground: root.foreground
@@ -301,6 +338,8 @@ Column {
 
       Button {
         visible: root._parity.running || root._parity.paused
+        id: parityCancelButton
+        hasCursor: root.buttonHasCursor(parityCancelButton)
         text: root.pendingLabel("parityCancel", "Cancel")
         bordered: true
         foreground: Color.urgent

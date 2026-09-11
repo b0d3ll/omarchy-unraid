@@ -22,6 +22,31 @@ Column {
     if (query === "") return root._sorted
     return root._sorted.filter(function(c) { return c.name.toLowerCase().indexOf(query) >= 0 })
   }
+  // See VmsView for the contract; the only difference here is that the row
+  // set is the *filtered* one, so searching re-aims the cursor.
+  property int cursorIndex: -1
+
+  // Passes the item itself, not coordinates: a row's y is relative to
+  // the Column it sits in, which is several parents away from the
+  // flickable that would have to scroll. Only Panel can map between them.
+  signal cursorRevealRequested(var item)
+
+  function moveCursor(delta) {
+    if (root._filtered.length === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? 0
+      : Math.max(0, Math.min(root._filtered.length - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    if (root.cursorIndex < 0 || root.cursorIndex >= root._filtered.length) return
+    root.containerSelected(root._filtered[root.cursorIndex].id)
+  }
+
+  // A search that shortens the list must not leave the cursor pointing past
+  // the end of it.
+  onCursorIndexChanged: if (root.cursorIndex >= root._filtered.length) root.cursorIndex = -1
+
   readonly property int _runningCount:
     (root._docker.containers || []).filter(function(c) { return c.state === "RUNNING" }).length
   readonly property int _updateCount:
@@ -95,15 +120,17 @@ Column {
     Repeater {
       model: root._filtered
 
-      Rectangle {
+      CursorSurface {
         id: row
         required property var modelData
+        required property int index
 
         width: root.width
         height: Style.space(36)
-        color: rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+        foreground: root.foreground
+        hasCursor: root.cursorIndex === row.index
 
-        Behavior on color { ColorAnimation { duration: 100 } }
+        onHasCursorChanged: if (row.hasCursor) root.cursorRevealRequested(row)
 
         StatusDot {
           anchors.left: parent.left
@@ -160,6 +187,7 @@ Column {
           id: rowMouse
           anchors.fill: parent
           hoverEnabled: true
+          onContainsMouseChanged: if (containsMouse) root.cursorIndex = row.index
           cursorShape: Qt.PointingHandCursor
           onClicked: root.containerSelected(row.modelData.id)
         }

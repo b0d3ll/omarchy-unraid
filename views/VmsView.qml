@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import qs.Commons
+import qs.Ui
 import "../components"
 
 // Virtual machine list (spec section 21). Same row pattern as Docker, no
@@ -15,6 +16,31 @@ Column {
   signal domainSelected(string domainId)
 
   readonly property var _vms: service ? service.vms : ({ available: false, domains: [] })
+  // Keyboard cursor, per Omarchy's convention: -1 until the first arrow
+  // press, so a keypress arms it rather than jumping straight to a row.
+  // Mouse hover writes to the same index, which is what keeps exactly one
+  // highlight on screen no matter which input is being used.
+  property int cursorIndex: -1
+
+  // Passes the item itself, not coordinates: a row's y is relative to
+  // the Column it sits in, which is several parents away from the
+  // flickable that would have to scroll. Only Panel can map between them.
+  signal cursorRevealRequested(var item)
+
+  readonly property var _rows: root._vms.domains || []
+
+  function moveCursor(delta) {
+    if (root._rows.length === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? 0
+      : Math.max(0, Math.min(root._rows.length - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    if (root.cursorIndex < 0 || root.cursorIndex >= root._rows.length) return
+    root.domainSelected(root._rows[root.cursorIndex].id)
+  }
+
   readonly property int _runningCount: (root._vms.domains || []).filter(function(v) { return v.state === "RUNNING" }).length
 
   width: parent ? parent.width : implicitWidth
@@ -72,17 +98,23 @@ Column {
     spacing: 0
 
     Repeater {
-      model: root._vms.domains || []
+      model: root._rows
 
-      Rectangle {
+      // CursorSurface rather than a Rectangle painting its own hover: its
+      // contract is that visuals come from `hasCursor`, never from
+      // containsMouse, which is exactly what lets one highlight serve both
+      // the mouse and the keyboard.
+      CursorSurface {
         id: row
         required property var modelData
+        required property int index
 
         width: root.width
         height: Style.space(36)
-        color: rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+        foreground: root.foreground
+        hasCursor: root.cursorIndex === row.index
 
-        Behavior on color { ColorAnimation { duration: 100 } }
+        onHasCursorChanged: if (row.hasCursor) root.cursorRevealRequested(row)
 
         StatusDot {
           anchors.left: parent.left
@@ -128,6 +160,7 @@ Column {
           id: rowMouse
           anchors.fill: parent
           hoverEnabled: true
+          onContainsMouseChanged: if (containsMouse) root.cursorIndex = row.index
           cursorShape: Qt.PointingHandCursor
           onClicked: root.domainSelected(row.modelData.id)
         }

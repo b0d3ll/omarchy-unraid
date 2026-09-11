@@ -14,6 +14,30 @@ Column {
   property var service: null
   property color foreground: Color.foreground
 
+  // Keyboard cursor over the quick actions — the only things here that do
+  // something when activated. See VmDetailView for the shape.
+  property int cursorIndex: -1
+  readonly property var _buttons: [webuiButton, terminalButton]
+  readonly property var _cursorTargets:
+    root._buttons.filter(function(b) { return b && b.visible })
+
+  function moveCursor(delta) {
+    var n = root._cursorTargets.length
+    if (n === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? (delta > 0 ? 0 : n - 1)
+      : Math.max(0, Math.min(n - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    var target = root._cursorTargets[root.cursorIndex]
+    if (target && target.enabled) target.clicked()
+  }
+
+  function buttonHasCursor(button) {
+    return root._cursorTargets[root.cursorIndex] === button
+  }
+
   readonly property var _metrics: service ? service.metrics : ({})
   readonly property var _cores: (root._metrics && root._metrics.cores) || []
   // Collapsed by default: 40 bars is a lot of panel to spend on something
@@ -494,6 +518,8 @@ Column {
       spacing: Style.space(8)
 
       Button {
+        id: webuiButton
+        hasCursor: root.buttonHasCursor(webuiButton)
         text: "WebUI"
         bordered: true
         foreground: root.foreground
@@ -505,6 +531,8 @@ Column {
       }
 
       Button {
+        id: terminalButton
+        hasCursor: root.buttonHasCursor(terminalButton)
         text: "Terminal"
         bordered: true
         foreground: root.foreground

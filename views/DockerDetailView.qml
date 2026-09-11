@@ -24,6 +24,31 @@ Column {
   // confirmation dialog rather than acting immediately (spec section 19).
   signal confirmRequested(string message, string confirmText, string kind)
 
+  // Keyboard cursor over the view's buttons — see VmDetailView for why this
+  // is an explicit list rather than Qt's focus chain.
+  property int cursorIndex: -1
+  readonly property var _cursorTargets:
+    root._buttons.filter(function(b) { return b && b.visible })
+
+  function moveCursor(delta) {
+    var n = root._cursorTargets.length
+    if (n === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? (delta > 0 ? 0 : n - 1)
+      : Math.max(0, Math.min(n - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    var target = root._cursorTargets[root.cursorIndex]
+    if (target && target.enabled) target.clicked()
+  }
+
+  function buttonHasCursor(button) {
+    return root._cursorTargets[root.cursorIndex] === button
+  }
+
+  readonly property var _buttons: [backButton, webuiButton, startButton, restartButton, stopButton, logsButton]
+
   readonly property var container: service ? service.containerById(containerId) : null
   readonly property var _pending: service ? service.dockerActionPending : null
   readonly property bool _busy: root._pending !== null && root._pending !== undefined
@@ -45,6 +70,8 @@ Column {
 
   // --------------------------------------------------------------- back row
   Button {
+    id: backButton
+    hasCursor: root.buttonHasCursor(backButton)
     text: "← Docker"
     foreground: root.foreground
     onClicked: root.backRequested()
@@ -126,6 +153,8 @@ Column {
 
     Button {
       visible: root.container && root.container.webUiUrl !== ""
+      id: webuiButton
+      hasCursor: root.buttonHasCursor(webuiButton)
       text: "Open WebUI"
       bordered: true
       foreground: root.foreground
@@ -189,6 +218,8 @@ Column {
         // runs without a confirmation (spec section 19).
         Button {
           visible: !root._running
+          id: startButton
+          hasCursor: root.buttonHasCursor(startButton)
           text: root.pendingLabel("start", "Start")
           bordered: true
           foreground: root.foreground
@@ -198,6 +229,8 @@ Column {
 
         Button {
           visible: root._running
+          id: restartButton
+          hasCursor: root.buttonHasCursor(restartButton)
           text: root.pendingLabel("restart", "Restart")
           bordered: true
           foreground: root.foreground
@@ -209,6 +242,8 @@ Column {
 
         Button {
           visible: root._running
+          id: stopButton
+          hasCursor: root.buttonHasCursor(stopButton)
           text: root.pendingLabel("stop", "Stop")
           bordered: true
           foreground: root.foreground
@@ -229,6 +264,8 @@ Column {
       PanelSectionHeader { text: "TOOLS"; foreground: root.foreground }
 
       Button {
+        id: logsButton
+        hasCursor: root.buttonHasCursor(logsButton)
         text: "Logs"
         bordered: true
         foreground: root.foreground

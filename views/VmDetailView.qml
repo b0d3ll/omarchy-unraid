@@ -23,6 +23,36 @@ Column {
   signal backRequested()
   signal confirmRequested(string message, string confirmText, string kind)
 
+  // Keyboard cursor over the view's buttons. An explicit list rather than
+  // Qt's focus chain: these sit in separate sections with their own
+  // visibility rules, and an array states the traversal order out loud
+  // instead of leaving it implied by declaration order in three places.
+  //
+  // `visible` already accounts for ancestors — a button inside a hidden Row
+  // reports false — so that filter is all the gating this needs.
+  property int cursorIndex: -1
+  readonly property var _cursorTargets:
+    root._buttons.filter(function(b) { return b && b.visible })
+
+  function moveCursor(delta) {
+    var n = root._cursorTargets.length
+    if (n === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? (delta > 0 ? 0 : n - 1)
+      : Math.max(0, Math.min(n - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    var target = root._cursorTargets[root.cursorIndex]
+    if (target && target.enabled) target.clicked()
+  }
+
+  function buttonHasCursor(button) {
+    return root._cursorTargets[root.cursorIndex] === button
+  }
+
+  readonly property var _buttons: [backButton, startButton, resumeButton, rebootButton, stopButton, pauseButton, resetButton, forceStopButton]
+
   readonly property var domain: service ? service.domainById(domainId) : null
   readonly property var _pending: service ? service.vmActionPending : null
   readonly property bool _busy: root._pending !== null && root._pending !== undefined
@@ -54,6 +84,8 @@ Column {
   spacing: Style.space(14)
 
   Button {
+    id: backButton
+    hasCursor: root.buttonHasCursor(backButton)
     text: "← Virtual Machines"
     foreground: root.foreground
     onClicked: root.backRequested()
@@ -153,6 +185,8 @@ Column {
 
         Button {
           visible: !root._running && !root._paused
+          id: startButton
+          hasCursor: root.buttonHasCursor(startButton)
           text: root.pendingLabel("start", "Start")
           bordered: true
           foreground: root.foreground
@@ -162,6 +196,8 @@ Column {
 
         Button {
           visible: root._paused
+          id: resumeButton
+          hasCursor: root.buttonHasCursor(resumeButton)
           text: root.pendingLabel("resume", "Resume")
           bordered: true
           foreground: root.foreground
@@ -171,6 +207,8 @@ Column {
 
         Button {
           visible: root._running
+          id: rebootButton
+          hasCursor: root.buttonHasCursor(rebootButton)
           text: root.pendingLabel("reboot", "Reboot")
           bordered: true
           foreground: root.foreground
@@ -182,6 +220,8 @@ Column {
 
         Button {
           visible: root._running || root._paused
+          id: stopButton
+          hasCursor: root.buttonHasCursor(stopButton)
           text: root.pendingLabel("stop", "Stop")
           bordered: true
           foreground: root.foreground
@@ -207,6 +247,8 @@ Column {
 
         Button {
           visible: root._running
+          id: pauseButton
+          hasCursor: root.buttonHasCursor(pauseButton)
           text: root.pendingLabel("pause", "Pause")
           bordered: true
           foreground: root.foreground
@@ -222,6 +264,8 @@ Column {
           // Running only, like Pause. libvirt's reset acts on a live
           // domain; a stopped VM has nothing to reset.
           visible: root._running
+          id: resetButton
+          hasCursor: root.buttonHasCursor(resetButton)
           text: root.pendingLabel("reset", "Reset")
           bordered: true
           foreground: Color.urgent
@@ -236,6 +280,8 @@ Column {
         // of pulling the power cable, so the confirmation says so in those
         // terms rather than asking a vague "are you sure".
         Button {
+          id: forceStopButton
+          hasCursor: root.buttonHasCursor(forceStopButton)
           text: root.pendingLabel("forceStop", "Force stop")
           bordered: true
           foreground: Color.urgent

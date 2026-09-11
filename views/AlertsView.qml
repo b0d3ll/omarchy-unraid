@@ -70,6 +70,28 @@ Column {
     return root._all.filter(function(n) { return n.importance === want })
   }
 
+  // See VmsView. Enter opens the notification the same way a click does.
+  property int cursorIndex: -1
+
+  // Passes the item itself, not coordinates: a row's y is relative to
+  // the Column it sits in, which is several parents away from the
+  // flickable that would have to scroll. Only Panel can map between them.
+  signal cursorRevealRequested(var item)
+
+  function moveCursor(delta) {
+    if (root._filtered.length === 0) return
+    root.cursorIndex = root.cursorIndex < 0
+      ? 0
+      : Math.max(0, Math.min(root._filtered.length - 1, root.cursorIndex + delta))
+  }
+
+  function activateCursor() {
+    if (root.cursorIndex < 0 || root.cursorIndex >= root._filtered.length) return
+    root.openNotification(root._filtered[root.cursorIndex])
+  }
+
+  onCursorIndexChanged: if (root.cursorIndex >= root._filtered.length) root.cursorIndex = -1
+
   function openNotification(item) {
     if (!root.service) return
     var url = root.service.notificationUrl(item.link)
@@ -137,17 +159,20 @@ Column {
     Repeater {
       model: root._filtered
 
-      Rectangle {
+      CursorSurface {
         id: entry
         required property var modelData
+        required property int index
 
         readonly property bool urgent: entry.modelData.needsAttention
 
         width: root.width
         implicitHeight: entryColumn.implicitHeight + Style.space(10)
-        color: entryMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+        height: implicitHeight
+        foreground: root.foreground
+        hasCursor: root.cursorIndex === entry.index
 
-        Behavior on color { ColorAnimation { duration: 100 } }
+        onHasCursorChanged: if (entry.hasCursor) root.cursorRevealRequested(entry)
 
         // Declared before the content on purpose: later siblings receive
         // input first, so a row-wide MouseArea placed after the column
@@ -156,6 +181,7 @@ Column {
           id: entryMouse
           anchors.fill: parent
           hoverEnabled: true
+          onContainsMouseChanged: if (containsMouse) root.cursorIndex = entry.index
           cursorShape: Qt.PointingHandCursor
           onClicked: root.openNotification(entry.modelData)
         }
