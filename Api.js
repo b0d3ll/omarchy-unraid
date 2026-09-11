@@ -41,7 +41,12 @@ var QUERY_HEALTH = "{ online vars { name version } }"
 
 var QUERY_SYSTEM = "{ info { versions { core { unraid api } } os { uptime } } vars { name version } }"
 
-var QUERY_METRICS = "{ metrics { cpu { percentTotal } memory { total used available percentTotal } } }"
+// `cpus` is the per-core breakdown, rendered only when the CPU row is
+// expanded — but it rides along with the total rather than getting its own
+// query, because it is the same resolver and 40 floats is nothing next to
+// the round trip it would otherwise cost.
+var QUERY_METRICS = "{ metrics { cpu { percentTotal cpus { percentTotal } } "
+  + "memory { total used available percentTotal } } }"
 
 // Per-disk state (spec section 26). Safe to poll — see the disk-sleep note
 // above. `numReads`/`numWrites` are deliberately left out: the state parser
@@ -426,6 +431,8 @@ function normalizeMetrics(data) {
   var usedBytes = total > 0 ? Math.max(0, total - available) : num(mem.used, 0)
   return {
     cpuPercent: Math.round(num(cpu.percentTotal, 0)),
+    // One rounded percentage per core, in the order the server lists them.
+    cores: (cpu.cpus || []).map(function(c) { return Math.round(num(c.percentTotal, 0)) }),
     ramPercent: Math.round(num(mem.percentTotal, 0)),
     ramUsedGb: total > 0 ? usedBytes / 1e9 : null,
     ramTotalGb: total > 0 ? total / 1e9 : null

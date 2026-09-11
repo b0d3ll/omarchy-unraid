@@ -15,6 +15,10 @@ Column {
   property color foreground: Color.foreground
 
   readonly property var _metrics: service ? service.metrics : ({})
+  readonly property var _cores: (root._metrics && root._metrics.cores) || []
+  // Collapsed by default: 40 bars is a lot of panel to spend on something
+  // you only look at when the total already told you to.
+  property bool cpuExpanded: false
   readonly property var _array: service ? service.arrayInfo : ({})
   readonly property var _capacity: (root._array && root._array.capacity) || ({})
   readonly property var _parity: (root._array && root._array.parityCheckStatus) || ({})
@@ -27,12 +31,6 @@ Column {
   // warmer than a platter, from being judged by a platter's standard.
   readonly property bool _hotWarn:
     root._hottest !== null && root._hottest.temp >= root._hottest.warnTempC
-  // Portion of the way from a cool-idle 20 °C to that disk's critical mark.
-  readonly property real _hotPercent: {
-    if (root._hottest === null) return 0
-    var span = Math.max(1, root._hottest.critTempC - 20)
-    return Math.max(0, Math.min(100, 100 * (root._hottest.temp - 20) / span))
-  }
   readonly property int _parityErrors:
     (root._lastParity && root._lastParity.errors !== null) ? root._lastParity.errors : 0
 
@@ -186,6 +184,21 @@ Column {
         : "Unavailable"
       foreground: root.foreground
     }
+
+    // A temperature is not a percentage of anything, so it reads as a value
+    // rather than a bar. It sits with the other counts instead, under
+    // Docker. The dot appears only once the disk is past its own warning
+    // threshold, so a normal reading is quiet.
+    MetricCard {
+      width: (parent.width - Style.space(16)) / 2
+      label: "Hottest disk"
+      statusState: root._hotWarn ? "CRITICAL" : ""
+      headline: root._hottest !== null ? root._hottest.temp + " °C" : "—"
+      subline: root._hottest !== null
+        ? root._hottest.name
+        : "all disks in standby"
+      foreground: root.foreground
+    }
   }
 
   PanelSeparator { width: parent.width; foreground: root.foreground }
@@ -203,11 +216,28 @@ Column {
         width: parent.width
         implicitHeight: cpuTitle.implicitHeight
 
+        // The whole header is the hit area, not a separate control: there
+        // is nothing else on this row to click, and a dedicated button
+        // would be smaller than the thing it toggles.
+        MouseArea {
+          anchors.fill: parent
+          anchors.margins: -Style.space(4)
+          enabled: root._cores.length > 0
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.cpuExpanded = !root.cpuExpanded
+        }
+
         Text {
           id: cpuTitle
           textFormat: Text.PlainText
           anchors.left: parent.left
-          text: "CPU"
+          // The caret is the affordance — without it nothing says the row
+          // does anything, and a core breakdown nobody knows about is the
+          // same as not having one.
+          text: root._cores.length > 0
+            ? (root.cpuExpanded ? "CPU ▾" : "CPU ▸")
+            : "CPU"
           color: Qt.darker(root.foreground, 1.4)
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
@@ -217,8 +247,9 @@ Column {
         Text {
           textFormat: Text.PlainText
           anchors.right: parent.right
-          text: root._metrics.cpuPercent !== null && root._metrics.cpuPercent !== undefined
-            ? root._metrics.cpuPercent + "%" : "—"
+          text: (root._metrics.cpuPercent !== null && root._metrics.cpuPercent !== undefined
+              ? root._metrics.cpuPercent + "%" : "—")
+            + (root._cores.length > 0 ? "  ·  " + root._cores.length + " cores" : "")
           color: root.foreground
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
@@ -229,6 +260,59 @@ Column {
         width: parent.width
         value: root._metrics.cpuPercent || 0
         fillColor: Color.accent
+      }
+
+      // One column per core, bottom-aligned, height by load. Widths are
+      // derived from the core count rather than fixed, so this stays honest
+      // on a 4-core box and on a 128-core one.
+      Item {
+        width: parent.width
+        visible: root.cpuExpanded && root._cores.length > 0
+        implicitHeight: visible ? Style.space(30) : 0
+
+        Row {
+          id: coreRow
+          anchors.fill: parent
+          spacing: Math.max(1, Math.round(parent.width / (root._cores.length * 4)))
+
+          Repeater {
+            model: root._cores
+
+            Item {
+              id: core
+              required property int modelData
+              // parent.parent would land on the Row, not the delegate — the
+              // id is the only thing that reliably names it from in here.
+              readonly property real load: Math.min(100, Math.max(0, core.modelData))
+
+              width: (coreRow.width - coreRow.spacing * (root._cores.length - 1))
+                / Math.max(1, root._cores.length)
+              height: coreRow.height
+
+              // Track first, then fill — the same two-layer shape as
+              // ProgressBar. Without the track an idle machine drew forty
+              // one-pixel stubs, which read as a dashed rule rather than as
+              // forty cores doing nothing.
+              Rectangle {
+                anchors.fill: parent
+                radius: width / 3
+                color: Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+              }
+
+              Rectangle {
+                anchors.bottom: parent.bottom
+                width: parent.width
+                // A floor of one pixel so a fully idle core still shows a
+                // tip rather than vanishing into its own track.
+                height: Math.max(1, core.height * core.load / 100)
+                radius: width / 3
+                color: core.load >= 90 ? Color.urgent : Color.accent
+
+                Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+              }
+            }
+          }
+        }
       }
     }
 
@@ -309,50 +393,6 @@ Column {
         width: parent.width
         value: root._capacity.usedPercent || 0
         fillColor: Color.accent
-      }
-    }
-
-    // Hottest disk. The bar is hidden when nothing is reporting, because a
-    // fully parked array has no temperature to draw — an empty bar would
-    // read as "cold" rather than "not measured".
-    Column {
-      width: parent.width
-      spacing: Style.space(4)
-
-      Item {
-        width: parent.width
-        implicitHeight: tempTitle.implicitHeight
-
-        Text {
-          id: tempTitle
-          textFormat: Text.PlainText
-          anchors.left: parent.left
-          text: "HOTTEST DISK"
-          color: Qt.darker(root.foreground, 1.4)
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          font.bold: true
-        }
-
-        Text {
-          textFormat: Text.PlainText
-          anchors.right: parent.right
-          text: root._hottest !== null
-            ? root._hottest.temp + " °C · " + root._hottest.name
-            : "all disks in standby"
-          color: root._hotWarn ? Color.urgent
-            : (root._hottest !== null ? root.foreground : Qt.darker(root.foreground, 1.6))
-          font.family: Style.font.family
-          font.pixelSize: Style.font.caption
-          font.italic: root._hottest === null
-        }
-      }
-
-      ProgressBar {
-        width: parent.width
-        visible: root._hottest !== null
-        value: root._hotPercent
-        fillColor: root._hotWarn ? Color.urgent : Color.accent
       }
     }
   }

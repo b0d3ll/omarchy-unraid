@@ -3,7 +3,7 @@
 Monitor and control an Unraid server from the Omarchy bar without leaving
 the desktop.
 
-**Status: v0.4.0.** Onboarding saves a real server URL and
+**Status: v0.5.0.** Onboarding saves a real server URL and
 API key (URL in `~/.config/omarchy-unraid/config.json`, key in the system
 keyring via `secret-tool`), and the whole panel now runs on live GraphQL:
 CPU/RAM, array state and capacity, parity, 30-odd Docker containers, VMs,
@@ -43,7 +43,7 @@ and alerts are announced — INFO notices are listed, never pushed.
   Docker and VM counts and the live transport, so the usual question —
   is everything up — is answered without opening the panel.
 - Overview: array state with its last parity check, Unraid version and
-  uptime, Docker/VM counts, the hottest disk, then
+  uptime, Docker/VM counts, the hottest disk as a value, then
   CPU / RAM / storage as bars, parity progress, recent notifications, and
   WebUI / Terminal actions. Storage is a bar rather than a tile because
   "5.0 / 14.4 TB" on its own never said which number was which — next to a
@@ -104,10 +104,22 @@ stop at 680px, which only ever bit on the long views — Storage's disk list
 and Docker's container list — cutting them off at a height that had
 nothing to do with how much room the screen had.
 
+## CPU cores
+
+Clicking the CPU row expands a strip with one column per core — 40 of them
+on the machine this was built against — each a miniature track and fill,
+red past 90%. It is collapsed by default, because that much panel is only
+worth spending once the total has told you to look.
+
+The per-core figures ride along with the CPU total rather than getting
+their own query: it is the same resolver, and forty floats is nothing next
+to the round trip it would cost.
+
 ## Disk temperature
 
-Overview shows the hottest disk that is currently reporting one, in the
-same shape as the CPU, RAM and storage rows. A parked disk reports no
+Overview shows the hottest disk that is currently reporting one, as a value
+alongside the Docker and VM counts. A temperature is not a percentage of
+anything, so it does not get a bar. A parked disk reports no
 temperature — the server never woke it to measure — so it is skipped
 rather than counted as cold, and an array that is entirely asleep reads
 "all disks in standby" with no bar, because an empty bar would say "cold"
@@ -116,9 +128,8 @@ instead of "not measured".
 Pool devices are included, since they are disks too. Each is judged
 against *its own* `warning`/`critical` thresholds where Unraid has them,
 falling back to Unraid's defaults of 45 °C and 55 °C — which is also what
-Unraid itself applies. The bar shows how far that disk is from its own
-critical mark rather than a shared scale, so a pool NVMe idling warmer
-than a platter is not held to the platter's standard.
+Unraid itself applies. That keeps a pool NVMe, which idles warmer than a
+platter, from being judged by a platter's standard.
 
 ## Keyboard
 
