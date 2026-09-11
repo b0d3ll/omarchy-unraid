@@ -21,6 +21,7 @@ Column {
   property color foreground: Color.foreground
 
   signal toastRequested(string message)
+  signal archiveAllRequested(string message, string confirmText, string importance, int count)
 
   readonly property var _all: service ? service.notifications : []
   readonly property var _filters: ["All", "Info", "Warnings", "Critical"]
@@ -31,6 +32,37 @@ Column {
     "No unread notifications.", "No unread notices.",
     "No unread warnings.", "No unread alerts."
   ]
+  readonly property var _nouns: ["notification", "notice", "warning", "alert"]
+
+  // The server's own unread counters, not _filtered.length: the list is
+  // fetched with limit 50, so on a backlog bigger than that the rows on
+  // screen would understate what "archive all" is about to archive.
+  readonly property var _unread:
+    root.service ? root.service.notificationSummary.unread : ({})
+  readonly property int _filterCount: {
+    switch (root.filterIndex) {
+      case 1: return root._unread.info || 0
+      case 2: return root._unread.warning || 0
+      case 3: return root._unread.alert || 0
+      default: return root._unread.total || 0
+    }
+  }
+
+  readonly property bool _bulkPending: {
+    var p = root.service ? root.service.notificationActionPending : null
+    return !!(p && p.bulk)
+  }
+
+  function requestArchiveAll() {
+    var n = root._filterCount
+    var noun = root._nouns[root.filterIndex] + (n === 1 ? "" : "s")
+    root.archiveAllRequested(
+      "Archive " + n + " " + noun + "?\n\nThey move to the server's archive and "
+        + "leave this list. Nothing is deleted, and Unraid can unarchive them.",
+      "Archive all",
+      root._importanceForFilter[root.filterIndex],
+      n)
+  }
 
   readonly property var _filtered: {
     var want = root._importanceForFilter[root.filterIndex] || ""
@@ -51,21 +83,43 @@ Column {
   width: parent ? parent.width : implicitWidth
   spacing: Style.space(10)
 
-  Row {
-    spacing: Style.space(8)
+  // Filters left, bulk archive right — the button acts on whatever the
+  // active filter shows, which is exactly what archiveAll(importance) does.
+  Item {
+    width: parent.width
+    implicitHeight: Math.max(filterRow.implicitHeight, archiveAll.implicitHeight)
 
-    Repeater {
-      model: root._filters
+    Row {
+      id: filterRow
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(8)
 
-      Button {
-        required property int index
-        required property string modelData
-        text: modelData
-        bordered: true
-        selected: root.filterIndex === index
-        foreground: root.foreground
-        onClicked: root.filterIndex = index
+      Repeater {
+        model: root._filters
+
+        Button {
+          required property int index
+          required property string modelData
+          text: modelData
+          bordered: true
+          selected: root.filterIndex === index
+          foreground: root.foreground
+          onClicked: root.filterIndex = index
+        }
       }
+    }
+
+    Button {
+      id: archiveAll
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      text: root._bulkPending ? "Archiving…" : "Archive all"
+      bordered: true
+      foreground: root.foreground
+      enabled: root.service && root._filterCount > 0
+        && !root.service.notificationActionPending && !root.service.offline
+      onClicked: root.requestArchiveAll()
     }
   }
 

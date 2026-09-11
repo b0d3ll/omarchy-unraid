@@ -119,6 +119,21 @@ function mutationArchiveNotification(id) {
   return "mutation { archiveNotification(id: " + JSON.stringify(id) + ") { id } }"
 }
 
+var NOTIFICATION_IMPORTANCE = { INFO: true, WARNING: true, ALERT: true }
+
+// `importance` is nullable, and omitting it archives every unread notice —
+// which is exactly what the Notices list's "All" filter means.
+//
+// GraphQL enum values cannot be quoted, so this is the one argument in this
+// file that is concatenated into a document without JSON.stringify around
+// it. Hence the whitelist: an unrecognised value drops the argument rather
+// than being pasted into the operation.
+function mutationArchiveAll(importance) {
+  var key = String(importance || "")
+  var arg = NOTIFICATION_IMPORTANCE[key] ? "(importance: " + key + ")" : ""
+  return "mutation { archiveAll" + arg + " { unread { info warning alert total } } }"
+}
+
 // ------------------------------------------------------ endpoint discovery
 //
 // What the server itself advertises (spec section 29 step 3). On a real

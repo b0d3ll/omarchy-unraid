@@ -610,6 +610,11 @@ Panel {
     AlertsView {
       service: root.service
       foreground: root.barForeground
+      onArchiveAllRequested: function(message, confirmText, importance, count) {
+        root.askConfirm(message, confirmText, function() {
+          root.service.archiveAllNotifications(importance, count)
+        })
+      }
       onToastRequested: function(message) { toast.show(message) }
     }
   }

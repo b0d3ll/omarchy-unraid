@@ -152,6 +152,20 @@ Item {
     archiveRequest.send(Api.mutationArchiveNotification(item.id))
   }
 
+  // Bulk archive, scoped to one importance or to everything unread. Shares
+  // the single-item pending slot and reply handler, so the per-row Archive
+  // buttons disable while this runs; `id` stays empty, which is how the
+  // rows tell "one of us is archiving" from "all of us are".
+  function archiveAllNotifications(importance, count) {
+    if (notificationActionPending) return
+    notificationActionPending = {
+      id: "",
+      bulk: true,
+      title: count + (count === 1 ? " notification" : " notifications")
+    }
+    archiveRequest.send(Api.mutationArchiveAll(importance))
+  }
+
   // Spec section 43: notify only for *newly observed* warnings and alerts,
   // and never twice for the same notification id.
   //

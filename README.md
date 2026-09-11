@@ -65,6 +65,9 @@ and alerts are announced — INFO notices are listed, never pushed.
   per-disk status rather than read off `vars` — see below.
 - Notices: every unread notification, filterable by All / Info / Warnings /
   Critical. Click one to open it in the Unraid WebUI, or archive it.
+  "Archive all" clears whatever the active filter shows, behind a
+  confirmation — it maps onto `archiveAll(importance)`, whose argument is
+  nullable, so the All filter simply omits it.
 - Settings: live Unraid/API version and uptime, plus editing the server
   address and replacing the API key.
 - Settings > Connections: the endpoint list with priority order, live
@@ -204,7 +207,13 @@ rung clears when the condition underneath it stops being true. The unread
 rungs are the ones under your control — archive the notification (in
 Notices, or in the Unraid WebUI) and the dot drops to the next true rung.
 An "attention needed" that will not go away usually means an old unread
-warning is still sitting in the list.
+warning is still sitting in the list — "Archive all" on the Warnings filter
+clears exactly that.
+
+Its count comes from the server's own unread counters rather than from the
+rows on screen: the list is fetched with `limit: 50`, so on a larger
+backlog the visible rows would understate what the button is about to
+archive.
 
 The tab carries no count. The dot and the banner already say that
 something needs attention, and all three read the same unread
