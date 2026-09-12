@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "Exec.js" as Exec
 
 // Non-secret configuration (spec section 40) — server URL and last-known
 // identity, persisted as plain JSON. The API key never lives here; see
@@ -123,7 +124,11 @@ Item {
     // parent directory — so the write happens in mkdirProc.onExited, not
     // here.
     root._pendingWrite = JSON.stringify(data, null, 2)
-    mkdirProc.command = ["mkdir", "-p", root.configDir]
+    // Absolute path, like every other program this plugin starts — see
+    // Exec.js. Nothing secret passes through here, but a plugin that
+    // resolves half its tools through $PATH and half by absolute path is
+    // one edit away from resolving the wrong half ambiently.
+    mkdirProc.command = [Exec.MKDIR, "-p", root.configDir]
     mkdirProc.running = true
   }
 

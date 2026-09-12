@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell.Io
 import qs.Commons
 import "Api.js" as Api
+import "Exec.js" as Exec
 import "Model.js" as Model
 
 // Owns the plugin's application state (spec section 35). Milestones 1–2
@@ -489,7 +490,11 @@ Item {
   // optional (spec section 29).
   Process {
     id: tailscaleProc
-    command: ["tailscale", "status", "--json"]
+    // Absolute path (Exec.js). Fails closed by construction: if the
+    // binary is not there the process cannot start, discovery yields no
+    // candidates, and the step completes — which is already how an absent
+    // or stopped Tailscale is handled.
+    command: [Exec.TAILSCALE, "status", "--json"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {

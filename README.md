@@ -85,6 +85,28 @@ The walkthrough above, and every shot here, was captured by driving the
 panel from the keyboard — which is also what it demonstrates. A copy of
 the clip lives in [`docs/demo.mp4`](docs/demo.mp4).
 
+## Security
+
+Every external program is started by **absolute path** — `/usr/bin/curl`,
+`/usr/bin/secret-tool`, `/usr/bin/mkdir`, `/usr/bin/tailscale` — and never
+resolved through `$PATH`. A shell plugin is a long-lived process holding an
+Unraid API key, so one writable directory ahead of `/usr/bin` would
+otherwise be enough to substitute `curl` or `secret-tool` and capture the
+credential. Resolution is deliberately not configurable, and there is no
+ambient fallback: an absolute path that does not exist makes the process
+fail to start, which is the correct closed failure.
+
+There is no shell anywhere. curl is invoked directly with `curl -H @file`,
+its environment cleared outright and `-q` set so `~/.curlrc` cannot add a
+flag. The key reaches curl through that header file — never argv, so it
+cannot be read from `ps` or `/proc/<pid>/cmdline` — and never the child's
+environment, so it is not in `/proc/<pid>/environ` either. The file lives
+in `/run/user/<uid>` (tmpfs, mode 0700, user-owned, gone at logout) and is
+blanked the moment the request finishes.
+
+The key itself lives in the system keyring via `secret-tool`, and reaches
+it on stdin rather than through an environment variable.
+
 ## Requirements
 
 - `secret-tool` (part of `libsecret`) and a running Secret Service provider

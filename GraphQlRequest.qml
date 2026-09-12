@@ -1,22 +1,31 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "Exec.js" as Exec
 
 // One GraphQL request. The only place in the plugin that builds a curl
 // invocation — ConnectionTest and every polled resource go through this.
 //
 // The API key is fetched from the keyring per request and handed to curl
-// via a header config file written by the spawned shell, so it never
-// appears in argv (`ps`/`/proc/<pid>/cmdline`) and never lands in a QML
-// property where a binding or log could pick it up.
+// through a header file, so it never appears in argv
+// (`ps`/`/proc/<pid>/cmdline`), never lands in a QML property where a
+// binding or log could pick it up, and — since the marketplace review —
+// is no longer in the child's environment either.
 //
-// Two hard-won details from getting this working against a real server:
-//   * `Process.environment` REPLACES the environment, so session vars have
-//     to be carried over explicitly or curl/bash lose PATH and secret-tool
-//     loses its D-Bus session.
-//   * A StdioCollector's `text` is a property, not a method, and is only
-//     reliable inside that collector's own onStreamFinished — hence the
-//     three-flag coordination instead of reading it from onExited.
+// curl is started directly by absolute path. There is no shell: an earlier
+// version wrapped the call in `bash -c` to mktemp the config and trap-clean
+// it, which meant four ambient executables (`bash`, `mktemp`, `rm`, `curl`)
+// resolved through an inherited $PATH while the credential sat in the
+// environment beside them. `curl -H @file` reads headers from a file
+// directly, so the shell bought nothing that could not be done without it.
+//
+// The environment is cleared outright rather than filtered. curl needs
+// nothing from it here, and `-q` keeps it from reading ~/.curlrc, so what
+// the request does is fully determined by this file.
+//
+// A StdioCollector's `text` is a property, not a method, and is only
+// reliable inside that collector's own onStreamFinished — hence the
+// three-flag coordination instead of reading it from onExited.
 Item {
   id: root
 
@@ -82,24 +91,28 @@ Item {
   // the header line early and leaves the closing quote stranded on the
   // next line, which curl rejects outright. Scrub, then escape the two
   // characters curl's quoted-value syntax treats specially.
-  function curlConfigValue(key) {
-    var cleaned = String(key).replace(/[\r\n\t]/g, "").trim()
-    return cleaned.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+  // A key never legitimately contains these, and a pasted one often carries
+  // a trailing newline — which inside a header file would split the header
+  // or terminate it early.
+  function headerValue(key) {
+    return String(key).replace(/[\r\n\t]/g, "").trim()
   }
 
-  function sessionEnv(extra) {
-    var base = {
-      PATH: Quickshell.env("PATH"),
-      HOME: Quickshell.env("HOME"),
-      USER: Quickshell.env("USER"),
-      DBUS_SESSION_BUS_ADDRESS: Quickshell.env("DBUS_SESSION_BUS_ADDRESS"),
-      XDG_RUNTIME_DIR: Quickshell.env("XDG_RUNTIME_DIR"),
-      DISPLAY: Quickshell.env("DISPLAY"),
-      WAYLAND_DISPLAY: Quickshell.env("WAYLAND_DISPLAY")
-    }
-    for (var k in extra) base[k] = extra[k]
-    return base
-  }
+  // The header file lives in XDG_RUNTIME_DIR: a tmpfs the kernel never
+  // writes to disk, mode 0700 and owned by this user, cleared at logout.
+  // One file per request object, blanked the moment the request finishes,
+  // so the key is resident only while curl is actually reading it.
+  //
+  // On the file's own mode: FileView exposes no permission control, so 0600
+  // cannot be asked for directly and the file lands at the process umask
+  // (0644 here). The confinement comes from the directory instead —
+  // /run/user/<uid> is 0700 and user-owned, so no other unprivileged user
+  // can traverse into it whatever the file says. Blanking after use is what
+  // closes the remaining window.
+  readonly property string _headerPath:
+    Quickshell.env("XDG_RUNTIME_DIR") + "/omarchy-unraid-headers-" + root._instanceId
+  readonly property string _instanceId:
+    Math.random().toString(36).slice(2) + "-" + Date.now().toString(36)
 
   // Unraid's HTTPS listener normally presents a self-signed certificate, so
   // curl rejects it and the panel reported a flat "could not reach the
@@ -114,31 +127,46 @@ Item {
   readonly property bool _isHttps: /^https:/i.test(root.endpoint)
 
   function _start(key) {
-    proc.environment = root.sessionEnv({
-      "OMARCHY_UNRAID_CURL_CONFIG":
-        'header = "x-api-key: ' + root.curlConfigValue(key) + '"\n'
-        + 'header = "Content-Type: application/json"\n'
-        + ((root.allowSelfSigned && root._isHttps) ? 'insecure\n' : ''),
-      "OMARCHY_UNRAID_QUERY": JSON.stringify({ query: root._pendingQuery }),
-      "OMARCHY_UNRAID_URL": root.endpoint
-    })
-    // A real mktemp'd file rather than `-K <(...)`: process substitution
-    // intermittently made curl misparse the config against a real server.
-    proc.command = ["bash", "-c",
-      'CFGFILE=$(mktemp) && trap \'rm -f "$CFGFILE"\' EXIT'
-      + ' && printf \'%s\' "$OMARCHY_UNRAID_CURL_CONFIG" > "$CFGFILE"'
+    // Written before the process starts, and blockWrites makes that
+    // ordering real rather than hopeful.
+    headerFile.setText(
+      "x-api-key: " + root.headerValue(key) + "\n"
+      + "Content-Type: application/json\n")
+
+    proc.clearEnvironment = true
+    proc.environment = ({})
+    proc.command = [
+      Exec.CURL,
+      // -q: ignore ~/.curlrc, so nothing outside this file can add a flag.
+      "-q", "-sS",
+      "--max-time", String(Math.max(1, root.timeoutSeconds)),
+      // A reply is a GraphQL document, never a payload. Without a ceiling a
+      // wrong URL pointing at something large — or a hostile answer — gets
+      // read into memory in full before anything looks at it.
+      "--max-filesize", String(root.maxResponseBytes),
+      // @file: curl reads the headers from the file rather than from argv,
+      // which is what keeps the key out of `ps`.
+      "-H", "@" + root._headerPath,
       // No `-f`: it suppresses the response body on an HTTP error, and for
       // GraphQL the body IS the diagnosis ("Cannot query field ...", or an
       // auth rejection). Errors are read out of the JSON instead, and a
       // genuine connection failure still shows up as a curl exit code.
-      + ' && curl -sS --max-time ' + Math.max(1, root.timeoutSeconds)
-      // A reply is a GraphQL document, never a payload. Without a ceiling a
-      // wrong URL pointing at something large — or a hostile answer — gets
-      // read into memory in full before anything looks at it.
-      + ' --max-filesize ' + root.maxResponseBytes
-      + ' -K "$CFGFILE" -X POST'
-      + ' --data "$OMARCHY_UNRAID_QUERY" "$OMARCHY_UNRAID_URL"']
+      "-X", "POST",
+      "--data", JSON.stringify({ query: root._pendingQuery }),
+      root.endpoint
+    ]
+    if (root.allowSelfSigned && root._isHttps) proc.command.splice(1, 0, "--insecure")
     proc.running = true
+  }
+
+  FileView {
+    id: headerFile
+    path: root._headerPath
+    // The file has to exist before curl is told to read it; without this
+    // the write would race the process start.
+    blockWrites: true
+    atomicWrites: false
+    printErrors: false
   }
 
   // A request that never completes would leave `busy` stuck and stop this
@@ -156,6 +184,7 @@ Item {
       if (!root._busy) return
       root._busy = false
       proc.running = false
+      headerFile.setText("")
       root.failed("unreachable", "The request timed out with no reply.")
     }
   }
@@ -176,6 +205,10 @@ Item {
       _stdoutDone = false
       _stderrDone = false
       proc.environment = {}
+      // The key has served its purpose the moment curl exits; leaving it
+      // in tmpfs until logout would be a plaintext credential sitting
+      // around for no reason.
+      headerFile.setText("")
       root._busy = false
       watchdog.stop()
 
